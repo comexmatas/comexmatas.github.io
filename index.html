@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Normal Prices Registry</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+        }
+        
+        .header p {
+            margin: 0;
+            color: #7f8c8d;
+        }
+        
+        .controls {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .file-selector {
+            margin-bottom: 15px;
+        }
+        
+        .file-selector label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        
+        .file-selector select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .load-button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+        
+        .load-button:hover {
+            background-color: #2980b9;
+        }
+        
+        .load-button:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+        
+        .table-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th {
+            background-color: #34495e;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 500;
+        }
+        
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .error {
+            background-color: #e74c3c;
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Normal Prices Registry</h1>
+        <p>Display and browse CSV data files</p>
+    </div>
+    
+    <div class="controls">
+        <div class="file-selector">
+            <label for="csvFile">Select CSV File:</label>
+            <select id="csvFile">
+                <option value="">Choose a file...</option>
+            </select>
+        </div>
+        <button id="loadButton" class="load-button" disabled>Load Data</button>
+    </div>
+    
+    <div id="errorMessage"></div>
+    <div id="dataContainer">
+        <div class="empty-state">
+            Select a CSV file and click "Load Data" to display the contents.
+        </div>
+    </div>
+
+    <script>
+        // Available CSV files (you can modify this list)
+        const availableFiles = [
+            'data/sample.csv'
+        ];
+        
+        // Populate file selector
+        const fileSelect = document.getElementById('csvFile');
+        const loadButton = document.getElementById('loadButton');
+        const errorMessage = document.getElementById('errorMessage');
+        const dataContainer = document.getElementById('dataContainer');
+        
+        // Add files to selector
+        availableFiles.forEach(file => {
+            const option = document.createElement('option');
+            option.value = file;
+            option.textContent = file.replace('data/', '').replace('.csv', '');
+            fileSelect.appendChild(option);
+        });
+        
+        // Enable/disable load button based on selection
+        fileSelect.addEventListener('change', function() {
+            loadButton.disabled = !this.value;
+        });
+        
+        // Load button click handler
+        loadButton.addEventListener('click', function() {
+            const selectedFile = fileSelect.value;
+            if (selectedFile) {
+                loadCSV(selectedFile);
+            }
+        });
+        
+        // CSV loading and parsing function
+        async function loadCSV(filePath) {
+            try {
+                // Show loading state
+                dataContainer.innerHTML = '<div class="loading">Loading data...</div>';
+                errorMessage.innerHTML = '';
+                
+                // Fetch the CSV file
+                const response = await fetch(filePath);
+                if (!response.ok) {
+                    throw new Error(`Failed to load file: ${response.status} ${response.statusText}`);
+                }
+                
+                const csvText = await response.text();
+                
+                // Parse CSV
+                const data = parseCSV(csvText);
+                
+                // Display data
+                displayData(data);
+                
+            } catch (error) {
+                console.error('Error loading CSV:', error);
+                errorMessage.innerHTML = `<div class="error">Error loading file: ${error.message}</div>`;
+                dataContainer.innerHTML = '<div class="empty-state">Failed to load data.</div>';
+            }
+        }
+        
+        // Simple CSV parser
+        function parseCSV(csvText) {
+            const lines = csvText.trim().split('\n');
+            if (lines.length === 0) {
+                return { headers: [], rows: [] };
+            }
+            
+            const headers = lines[0].split(',').map(h => h.trim());
+            const rows = lines.slice(1).map(line => {
+                return line.split(',').map(cell => cell.trim());
+            });
+            
+            return { headers, rows };
+        }
+        
+        // Display data in table
+        function displayData(data) {
+            if (data.rows.length === 0) {
+                dataContainer.innerHTML = '<div class="empty-state">No data found in the file.</div>';
+                return;
+            }
+            
+            let tableHTML = `
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                ${data.headers.map(header => `<th>${escapeHtml(header)}</th>`).join('')}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.rows.map(row => `
+                                <tr>
+                                    ${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            dataContainer.innerHTML = tableHTML;
+        }
+        
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
