@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Normal Prices Registry</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -133,13 +132,13 @@
 <body>
     <div class="header">
         <h1>Normal Prices Registry</h1>
-        <p>Display and browse Excel data files</p>
+        <p>Display and browse CSV data files</p>
     </div>
     
     <div class="controls">
         <div class="file-selector">
-            <label for="excelFile">Select Excel File:</label>
-            <select id="excelFile">
+            <label for="csvFile">Select CSV File:</label>
+            <select id="csvFile">
                 <option value="">Choose a file...</option>
             </select>
         </div>
@@ -149,18 +148,18 @@
     <div id="errorMessage"></div>
     <div id="dataContainer">
         <div class="empty-state">
-            Select an Excel file and click "Load Data" to display the contents.
+            Select a CSV file and click "Load Data" to display the contents.
         </div>
     </div>
 
     <script>
-        // Available Excel files (you can modify this list)
+        // Available CSV files (you can modify this list)
         const availableFiles = [
-            'data/products.xlsx'
+            'data/sample.csv'
         ];
         
         // Populate file selector
-        const fileSelect = document.getElementById('excelFile');
+        const fileSelect = document.getElementById('csvFile');
         const loadButton = document.getElementById('loadButton');
         const errorMessage = document.getElementById('errorMessage');
         const dataContainer = document.getElementById('dataContainer');
@@ -169,7 +168,7 @@
         availableFiles.forEach(file => {
             const option = document.createElement('option');
             option.value = file;
-            option.textContent = file.replace('data/', '').replace('.xlsx', '');
+            option.textContent = file.replace('data/', '').replace('.csv', '');
             fileSelect.appendChild(option);
         });
         
@@ -182,68 +181,51 @@
         loadButton.addEventListener('click', function() {
             const selectedFile = fileSelect.value;
             if (selectedFile) {
-                loadExcel(selectedFile);
+                loadCSV(selectedFile);
             }
         });
         
-        // Excel loading and parsing function
-        async function loadExcel(filePath) {
+        // CSV loading and parsing function
+        async function loadCSV(filePath) {
             try {
                 // Show loading state
                 dataContainer.innerHTML = '<div class="loading">Loading data...</div>';
                 errorMessage.innerHTML = '';
                 
-                // Fetch the Excel file
+                // Fetch the CSV file
                 const response = await fetch(filePath);
                 if (!response.ok) {
                     throw new Error(`Failed to load file: ${response.status} ${response.statusText}`);
                 }
                 
-                const arrayBuffer = await response.arrayBuffer();
+                const csvText = await response.text();
                 
-                // Parse Excel file using SheetJS
-                const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-                
-                // Get the first worksheet
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-                
-                // Convert to JSON array
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-                
-                // Parse the data
-                const data = parseExcelData(jsonData);
+                // Parse CSV
+                const data = parseCSV(csvText);
                 
                 // Display data
                 displayData(data);
                 
             } catch (error) {
-                console.error('Error loading Excel:', error);
+                console.error('Error loading CSV:', error);
                 errorMessage.innerHTML = `<div class="error">Error loading file: ${error.message}</div>`;
                 dataContainer.innerHTML = '<div class="empty-state">Failed to load data.</div>';
             }
         }
         
-        // Excel data parser
-        function parseExcelData(jsonData) {
-            if (jsonData.length === 0) {
+        // Simple CSV parser
+        function parseCSV(csvText) {
+            const lines = csvText.trim().split('\n');
+            if (lines.length === 0) {
                 return { headers: [], rows: [] };
             }
             
-            // First row contains headers
-            const headers = jsonData[0] || [];
-            
-            // Remaining rows contain data
-            const rows = jsonData.slice(1).map(row => {
-                // Ensure each row has the same number of columns as headers
-                const paddedRow = [...row];
-                while (paddedRow.length < headers.length) {
-                    paddedRow.push('');
-                }
-                return paddedRow.map(cell => cell !== null && cell !== undefined ? String(cell) : '');
+            const headers = lines[0].split(',').map(h => h.trim());
+            const rows = lines.slice(1).map(line => {
+                return line.split(',').map(cell => cell.trim());
             });
             
-            return { headers: headers.map(h => String(h || '')), rows };
+            return { headers, rows };
         }
         
         // Display data in table
