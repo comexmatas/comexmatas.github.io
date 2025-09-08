@@ -2,5 +2,5 @@
 App for registering of Normal prices 
 
 # TODO
-- [ ] Make script to dump product prices csv to github
+- [x] Make script to dump product prices xlsx to github
 - [ ] Build a front-end
