@@ -48,17 +48,7 @@
             align-items: end;
         }
         
-        .file-selector {
-            margin-bottom: 15px;
-        }
-        
-        .file-selector label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: 500;
-        }
-        
-        .file-selector select, .search-input {
+        .search-input {
             width: 100%;
             padding: 8px 12px;
             border: 1px solid #ddd;
@@ -99,7 +89,7 @@
             background: white;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            overflow: hidden;
+            overflow: auto;
         }
         
         table {
@@ -121,6 +111,7 @@
         td {
             padding: 12px;
             border-bottom: 1px solid #ecf0f1;
+            white-space: nowrap;
         }
         
         tr:hover {
@@ -195,15 +186,9 @@
     </div>
     
     <div class="controls">
-        <div class="file-selector">
-            <label for="csvFile">Select Data File:</label>
-            <select id="csvFile">
-                <option value="">Choose a file...</option>
-            </select>
-        </div>
         <div class="controls-row">
             <input id="searchInput" class="search-input" type="search" placeholder="Search product_id, brand_name, product_name, product_category_name_level_1" />
-            <button id="loadButton" class="load-button" disabled>Load Data</button>
+            <button id="loadButton" class="load-button">Load Data</button>
             <button id="syncButton" class="sync-button" disabled>Sync</button>
         </div>
         <div class="status-bar">
@@ -215,18 +200,15 @@
     <div id="errorMessage"></div>
     <div id="dataContainer">
         <div class="empty-state">
-            Select a data file and click "Load Data" to display the contents.
+            Click "Load Data" to display the contents.
         </div>
     </div>
 
     <script>
-        // Available data files (you can modify this list)
-        const availableFiles = [
-            'data/products.xlsx'
-        ];
+        // Defaults
+        const DEFAULT_FILE = 'data/products.xlsx';
         
         // UI elements
-        const fileSelect = document.getElementById('csvFile');
         const loadButton = document.getElementById('loadButton');
         const syncButton = document.getElementById('syncButton');
         const searchInput = document.getElementById('searchInput');
@@ -237,7 +219,7 @@
 
         // App state
         const pageSize = 100; // first 100 rows by default
-        let workbookRef = null; // original workbook to preserve formatting where possible
+        let workbookRef = null; // original workbook
         let sheetNameRef = null;
         let headersRef = [];
         let allRows = []; // array of objects keyed by headers
@@ -247,19 +229,6 @@
         let errorById = new Set(); // rows with validation errors
         let fileHandleRef = null; // File System Access API handle (if granted)
 
-        // Add files to selector
-        availableFiles.forEach(file => {
-            const option = document.createElement('option');
-            option.value = file;
-            option.textContent = file.replace('data/', '');
-            fileSelect.appendChild(option);
-        });
-        
-        // Enable/disable load button based on selection
-        fileSelect.addEventListener('change', function() {
-            loadButton.disabled = !this.value;
-        });
-        
         // Debounced search
         let searchTimer = null;
         searchInput.addEventListener('input', () => {
@@ -274,10 +243,7 @@
         
         // Load button click handler
         loadButton.addEventListener('click', function() {
-            const selectedFile = fileSelect.value;
-            if (selectedFile) {
-                loadData(selectedFile);
-            }
+            loadData(DEFAULT_FILE);
         });
 
         // Sync button handler
@@ -316,7 +282,6 @@
                 }
                 const csvText = await response.text();
                 const data = parseCSV(csvText);
-                // Convert to object rows
                 headersRef = data.headers;
                 allRows = data.rows.map((row, idx) => rowToObject(headersRef, row, idx));
                 filteredRows = allRows;
@@ -522,18 +487,15 @@
         }
         
         async function attemptSync() {
-            // Try direct file write via File System Access API; fallback to download
             const updatedWb = buildUpdatedWorkbook();
             const buffer = XLSX.write(updatedWb, { type: 'array', bookType: 'xlsx' });
 
-            // If FS API unavailable, fallback
             if (!('showOpenFilePicker' in window) && !fileHandleRef) {
                 await downloadUpdatedWorkbook(buffer);
                 return;
             }
 
             try {
-                // Ask user to pick the local repo file on first sync
                 if (!fileHandleRef) {
                     const [handle] = await window.showOpenFilePicker({
                         types: [{ description: 'Excel Workbook', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }],
@@ -542,7 +504,6 @@
                     });
                     fileHandleRef = handle;
                 }
-                // Verify we can write
                 const perm = await fileHandleRef.requestPermission({ mode: 'readwrite' });
                 if (perm !== 'granted') throw new Error('Permission not granted to write the file.');
                 const writable = await fileHandleRef.createWritable();
@@ -558,7 +519,6 @@
         }
 
         function buildUpdatedWorkbook() {
-            // Construct data with competitor_price merged
             const outHeaders = headersRef.includes('competitor_price') ? headersRef.slice() : headersRef.concat(['competitor_price']);
             const data = allRows.map(r => {
                 const price = dirtyById.get(r.__id);
