@@ -176,6 +176,14 @@
             outline: 2px solid #e74c3c;
             background: #fdecea;
         }
+        
+        .thumb {
+            width: 40px;
+            height: 40px;
+            object-fit: cover;
+            border-radius: 4px;
+            border: 1px solid #eee;
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
@@ -405,7 +413,7 @@
                 const isDirty = dirtyById.has(rowId);
                 const priceVal = dirtyById.get(rowId) ?? '';
                 const rowClass = isDirty ? ' class="row-dirty"' : '';
-                const cells = safeHeaders.map(h => `<td>${escapeHtml(String(r[h] ?? ''))}</td>`).join('');
+                const cells = safeHeaders.map(h => `<td>${renderCell(h, r[h])}</td>`).join('');
                 const priceInputClass = errorById.has(rowId) ? 'price-input cell-error' : 'price-input';
                 const priceCell = `<td><input type="text" inputmode="decimal" pattern="[0-9]*" class="${priceInputClass}" data-rowid="${escapeHtml(rowId)}" value="${escapeAttr(priceVal)}" placeholder="0.00" /></td>`;
                 return `<tr${rowClass}>${cells}${priceCell}</tr>`;
@@ -419,6 +427,17 @@
                         </tbody>
                     </table>
                 </div>`;
+        }
+
+        function renderCell(header, value) {
+            const headerLc = String(header || '').toLowerCase();
+            const text = String(value ?? '');
+            if (headerLc === 'url' && text) {
+                const safeUrl = escapeAttr(text);
+                // Render thumbnail image wrapped by link, with fallback to text
+                return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer"><img src="${safeUrl}" class="thumb" onerror="this.onerror=null; this.replaceWith(Object.assign(document.createElement('a'), {href: '${safeUrl}', target: '_blank', rel: 'noopener noreferrer', textContent: 'link'}));" /></a>`;
+            }
+            return escapeHtml(text);
         }
 
         function buildPagination(total, page, totalPages) {
