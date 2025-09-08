@@ -41,6 +41,13 @@
             margin-bottom: 20px;
         }
         
+        .controls-row {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 12px;
+            align-items: end;
+        }
+        
         .file-selector {
             margin-bottom: 15px;
         }
@@ -51,7 +58,7 @@
             font-weight: 500;
         }
         
-        .file-selector select {
+        .file-selector select, .search-input {
             width: 100%;
             padding: 8px 12px;
             border: 1px solid #ddd;
@@ -59,7 +66,7 @@
             font-size: 14px;
         }
         
-        .load-button {
+        .load-button, .sync-button, .download-button {
             background-color: #3498db;
             color: white;
             border: none;
@@ -70,13 +77,22 @@
             transition: background-color 0.2s;
         }
         
-        .load-button:hover {
-            background-color: #2980b9;
-        }
+        .sync-button { background-color: #27ae60; }
+        .download-button { background-color: #8e44ad; }
         
-        .load-button:disabled {
+        .load-button:hover { background-color: #2980b9; }
+        .sync-button:hover { background-color: #1e8449; }
+        .download-button:hover { background-color: #7d3c98; }
+        
+        .load-button:disabled, .sync-button:disabled, .download-button:disabled {
             background-color: #bdc3c7;
             cursor: not-allowed;
+        }
+        
+        .status-bar {
+            margin-top: 10px;
+            color: #7f8c8d;
+            font-size: 13px;
         }
         
         .table-container {
@@ -97,6 +113,9 @@
             padding: 12px;
             text-align: left;
             font-weight: 500;
+            position: sticky;
+            top: 0;
+            z-index: 1;
         }
         
         td {
@@ -127,6 +146,45 @@
             padding: 40px;
             color: #7f8c8d;
         }
+        
+        .pagination {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            align-items: center;
+            padding: 10px 12px;
+        }
+        
+        .pagination button {
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            background: white;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        
+        .pagination button:disabled {
+            color: #aaa;
+            cursor: not-allowed;
+            background: #f6f6f6;
+        }
+        
+        .price-input {
+            width: 120px;
+            padding: 6px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .row-dirty {
+            background-color: #fffbea;
+        }
+        
+        .cell-error {
+            outline: 2px solid #e74c3c;
+            background: #fdecea;
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
@@ -143,7 +201,15 @@
                 <option value="">Choose a file...</option>
             </select>
         </div>
-        <button id="loadButton" class="load-button" disabled>Load Data</button>
+        <div class="controls-row">
+            <input id="searchInput" class="search-input" type="search" placeholder="Search product_id, brand_name, product_name, product_category_name_level_1" />
+            <button id="loadButton" class="load-button" disabled>Load Data</button>
+            <button id="syncButton" class="sync-button" disabled>Sync</button>
+        </div>
+        <div class="status-bar">
+            <span id="statusText">No data loaded.</span>
+            <span id="dirtyText"></span>
+        </div>
     </div>
     
     <div id="errorMessage"></div>
@@ -159,12 +225,28 @@
             'data/products.xlsx'
         ];
         
-        // Populate file selector
+        // UI elements
         const fileSelect = document.getElementById('csvFile');
         const loadButton = document.getElementById('loadButton');
+        const syncButton = document.getElementById('syncButton');
+        const searchInput = document.getElementById('searchInput');
         const errorMessage = document.getElementById('errorMessage');
         const dataContainer = document.getElementById('dataContainer');
-        
+        const statusText = document.getElementById('statusText');
+        const dirtyText = document.getElementById('dirtyText');
+
+        // App state
+        const pageSize = 100; // first 100 rows by default
+        let workbookRef = null; // original workbook to preserve formatting where possible
+        let sheetNameRef = null;
+        let headersRef = [];
+        let allRows = []; // array of objects keyed by headers
+        let filteredRows = [];
+        let currentPage = 1;
+        let dirtyById = new Map(); // id -> numeric price string
+        let errorById = new Set(); // rows with validation errors
+        let fileHandleRef = null; // File System Access API handle (if granted)
+
         // Add files to selector
         availableFiles.forEach(file => {
             const option = document.createElement('option');
@@ -178,11 +260,37 @@
             loadButton.disabled = !this.value;
         });
         
+        // Debounced search
+        let searchTimer = null;
+        searchInput.addEventListener('input', () => {
+            if (!allRows.length) return;
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => {
+                applySearch(searchInput.value.trim());
+                currentPage = 1;
+                render();
+            }, 200);
+        });
+        
         // Load button click handler
         loadButton.addEventListener('click', function() {
             const selectedFile = fileSelect.value;
             if (selectedFile) {
                 loadData(selectedFile);
+            }
+        });
+
+        // Sync button handler
+        syncButton.addEventListener('click', async () => {
+            if (errorById.size > 0) {
+                alert('Please fix validation errors before syncing.');
+                return;
+            }
+            try {
+                await attemptSync();
+            } catch (e) {
+                console.error('Sync failed, falling back to download:', e);
+                await downloadUpdatedWorkbook();
             }
         });
         
@@ -197,27 +305,29 @@
             }
         }
 
-        // CSV loading and parsing function
+        // CSV loading and parsing function (kept for completeness)
         async function loadCSV(filePath) {
             try {
-                // Show loading state
                 dataContainer.innerHTML = '<div class="loading">Loading data...</div>';
                 errorMessage.innerHTML = '';
-                
-                // Fetch the CSV file
                 const response = await fetch(filePath);
                 if (!response.ok) {
                     throw new Error(`Failed to load file: ${response.status} ${response.statusText}`);
                 }
-                
                 const csvText = await response.text();
-                
-                // Parse CSV
                 const data = parseCSV(csvText);
-                
-                // Display data
-                displayData(data);
-                
+                // Convert to object rows
+                headersRef = data.headers;
+                allRows = data.rows.map((row, idx) => rowToObject(headersRef, row, idx));
+                filteredRows = allRows;
+                workbookRef = null;
+                sheetNameRef = null;
+                dirtyById.clear();
+                errorById.clear();
+                currentPage = 1;
+                syncButton.disabled = false; // will fallback to download later
+                statusText.textContent = `Loaded ${allRows.length} rows`;
+                render();
             } catch (error) {
                 console.error('Error loading CSV:', error);
                 errorMessage.innerHTML = `<div class="error">Error loading file: ${error.message}</div>`;
@@ -228,11 +338,9 @@
         // XLSX loading and parsing function
         async function loadXLSX(filePath) {
             try {
-                // Show loading state
                 dataContainer.innerHTML = '<div class="loading">Loading data...</div>';
                 errorMessage.innerHTML = '';
 
-                // Fetch the XLSX file as ArrayBuffer
                 const response = await fetch(filePath);
                 if (!response.ok) {
                     throw new Error(`Failed to load file: ${response.status} ${response.statusText}`);
@@ -244,17 +352,29 @@
                 const firstSheetName = workbook.SheetNames[0];
                 const firstSheet = workbook.Sheets[firstSheetName];
 
-                // Convert to array of arrays, first row as headers
                 const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, blankrows: false });
                 if (!rows || rows.length === 0) {
-                    displayData({ headers: [], rows: [] });
+                    headersRef = [];
+                    allRows = [];
+                    filteredRows = [];
+                    displayEmpty();
                     return;
                 }
 
                 const headers = rows[0].map(h => String(h ?? '').trim());
                 const dataRows = rows.slice(1).map(r => headers.map((_, idx) => String((r[idx] ?? '')).trim()));
 
-                displayData({ headers, rows: dataRows });
+                headersRef = headers;
+                allRows = dataRows.map((row, idx) => rowToObject(headersRef, row, idx));
+                filteredRows = allRows;
+                workbookRef = workbook;
+                sheetNameRef = firstSheetName;
+                dirtyById.clear();
+                errorById.clear();
+                currentPage = 1;
+                syncButton.disabled = false; // will attempt FS API later
+                statusText.textContent = `Loaded ${allRows.length} rows`;
+                render();
             } catch (error) {
                 console.error('Error loading XLSX:', error);
                 errorMessage.innerHTML = `<div class="error">Error loading file: ${error.message}</div>`;
@@ -262,55 +382,228 @@
             }
         }
         
-        // Simple CSV parser
         function parseCSV(csvText) {
             const lines = csvText.trim().split('\n');
             if (lines.length === 0) {
                 return { headers: [], rows: [] };
             }
-            
             const headers = lines[0].split(',').map(h => h.trim());
-            const rows = lines.slice(1).map(line => {
-                return line.split(',').map(cell => cell.trim());
-            });
-            
+            const rows = lines.slice(1).map(line => line.split(',').map(cell => cell.trim()));
             return { headers, rows };
         }
-        
-        // Display data in table
-        function displayData(data) {
-            if (data.rows.length === 0) {
-                dataContainer.innerHTML = '<div class="empty-state">No data found in the file.</div>';
+
+        function rowToObject(headers, row, idx) {
+            const obj = {};
+            headers.forEach((h, i) => { obj[h] = row[i] ?? ''; });
+            obj.__rowIndex = idx;
+            obj.__id = obj.product_id && obj.product_id !== '' ? String(obj.product_id) : `row_${idx}`;
+            return obj;
+        }
+
+        function applySearch(query) {
+            if (!query) {
+                filteredRows = allRows;
                 return;
             }
-            
-            let tableHTML = `
+            const q = query.toLowerCase();
+            const fields = ['product_id', 'brand_name', 'product_name', 'product_category_name_level_1'];
+            filteredRows = allRows.filter(r => fields.some(f => String(r[f] ?? '').toLowerCase().includes(q)));
+        }
+
+        function render() {
+            if (!filteredRows.length) {
+                displayEmpty();
+                return;
+            }
+            const total = filteredRows.length;
+            const totalPages = Math.max(1, Math.ceil(total / pageSize));
+            if (currentPage > totalPages) currentPage = totalPages;
+            const start = (currentPage - 1) * pageSize;
+            const pageRows = filteredRows.slice(start, start + pageSize);
+
+            dataContainer.innerHTML = buildTable(headersRef, pageRows) + buildPagination(total, currentPage, totalPages);
+            updateDirtyStatus();
+        }
+
+        function buildTable(headers, rows) {
+            // Build headers with competitor_price as extra column
+            const safeHeaders = headers.slice();
+            const thead = `
+                <thead>
+                    <tr>
+                        ${safeHeaders.map(h => `<th>${escapeHtml(h)}</th>`).join('')}
+                        <th>competitor_price</th>
+                    </tr>
+                </thead>`;
+            const tbodyRows = rows.map(r => {
+                const rowId = r.__id;
+                const isDirty = dirtyById.has(rowId);
+                const priceVal = dirtyById.get(rowId) ?? '';
+                const rowClass = isDirty ? ' class="row-dirty"' : '';
+                const cells = safeHeaders.map(h => `<td>${escapeHtml(String(r[h] ?? ''))}</td>`).join('');
+                const priceInputClass = errorById.has(rowId) ? 'price-input cell-error' : 'price-input';
+                const priceCell = `<td><input type="text" inputmode="decimal" pattern="[0-9]*" class="${priceInputClass}" data-rowid="${escapeHtml(rowId)}" value="${escapeAttr(priceVal)}" placeholder="0.00" /></td>`;
+                return `<tr${rowClass}>${cells}${priceCell}</tr>`;
+            }).join('');
+            return `
                 <div class="table-container">
                     <table>
-                        <thead>
-                            <tr>
-                                ${data.headers.map(header => `<th>${escapeHtml(header)}</th>`).join('')}
-                            </tr>
-                        </thead>
+                        ${thead}
                         <tbody>
-                            ${data.rows.map(row => `
-                                <tr>
-                                    ${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}
-                                </tr>
-                            `).join('')}
+                            ${tbodyRows}
                         </tbody>
                     </table>
-                </div>
-            `;
-            
-            dataContainer.innerHTML = tableHTML;
+                </div>`;
+        }
+
+        function buildPagination(total, page, totalPages) {
+            return `
+                <div class="pagination">
+                    <span>${total} rows • Page ${page} of ${totalPages}</span>
+                    <button ${page <= 1 ? 'disabled' : ''} id="prevPage">Prev</button>
+                    <button ${page >= totalPages ? 'disabled' : ''} id="nextPage">Next</button>
+                </div>`;
+        }
+
+        function updateDirtyStatus() {
+            const dirtyCount = dirtyById.size;
+            dirtyText.textContent = dirtyCount ? ` • ${dirtyCount} edited` : '';
+            // Bind events for price inputs and pagination buttons
+            document.querySelectorAll('input.price-input').forEach(input => {
+                input.addEventListener('input', onPriceInputChange);
+                input.addEventListener('blur', onPriceInputBlur);
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') { e.currentTarget.blur(); }
+                });
+            });
+            const prevBtn = document.getElementById('prevPage');
+            const nextBtn = document.getElementById('nextPage');
+            if (prevBtn) prevBtn.addEventListener('click', () => { currentPage = Math.max(1, currentPage - 1); render(); });
+            if (nextBtn) nextBtn.addEventListener('click', () => { currentPage += 1; render(); });
+        }
+
+        function onPriceInputChange(e) {
+            const input = e.currentTarget;
+            const rowId = input.getAttribute('data-rowid');
+            let val = input.value;
+            // validation: only numbers (allow one dot), non-negative
+            val = val.replace(/,/g, '.');
+            if (!/^\d*(?:\.\d{0,2})?$/.test(val)) {
+                errorById.add(rowId);
+                input.classList.add('cell-error');
+            } else {
+                input.classList.remove('cell-error');
+                errorById.delete(rowId);
+                if (val === '') {
+                    dirtyById.delete(rowId);
+                } else {
+                    dirtyById.set(rowId, val);
+                }
+            }
+            // mark row dirty state visually
+            const tr = input.closest('tr');
+            if (tr) {
+                if (dirtyById.has(rowId)) tr.classList.add('row-dirty'); else tr.classList.remove('row-dirty');
+            }
+            dirtyText.textContent = dirtyById.size ? ` • ${dirtyById.size} edited` : '';
+            syncButton.disabled = errorById.size > 0;
+        }
+
+        function onPriceInputBlur(e) {
+            const input = e.currentTarget;
+            const rowId = input.getAttribute('data-rowid');
+            let val = input.value.replace(/,/g, '.');
+            if (val && /^\d+(?:\.\d+)?$/.test(val)) {
+                // normalize to at most 2 decimals
+                const num = Number(val);
+                input.value = Number.isFinite(num) ? num.toFixed(2) : val;
+                dirtyById.set(rowId, input.value);
+            }
         }
         
-        // Escape HTML to prevent XSS
+        async function attemptSync() {
+            // Try direct file write via File System Access API; fallback to download
+            const updatedWb = buildUpdatedWorkbook();
+            const buffer = XLSX.write(updatedWb, { type: 'array', bookType: 'xlsx' });
+
+            // If FS API unavailable, fallback
+            if (!('showOpenFilePicker' in window) && !fileHandleRef) {
+                await downloadUpdatedWorkbook(buffer);
+                return;
+            }
+
+            try {
+                // Ask user to pick the local repo file on first sync
+                if (!fileHandleRef) {
+                    const [handle] = await window.showOpenFilePicker({
+                        types: [{ description: 'Excel Workbook', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }],
+                        excludeAcceptAllOption: false,
+                        multiple: false
+                    });
+                    fileHandleRef = handle;
+                }
+                // Verify we can write
+                const perm = await fileHandleRef.requestPermission({ mode: 'readwrite' });
+                if (perm !== 'granted') throw new Error('Permission not granted to write the file.');
+                const writable = await fileHandleRef.createWritable();
+                await writable.write(buffer);
+                await writable.close();
+                alert('Sync complete: wrote updates to local file.');
+                dirtyById.clear();
+                render();
+            } catch (err) {
+                console.warn('Direct sync failed, offering download instead:', err);
+                await downloadUpdatedWorkbook(buffer);
+            }
+        }
+
+        function buildUpdatedWorkbook() {
+            // Construct data with competitor_price merged
+            const outHeaders = headersRef.includes('competitor_price') ? headersRef.slice() : headersRef.concat(['competitor_price']);
+            const data = allRows.map(r => {
+                const price = dirtyById.get(r.__id);
+                const obj = {};
+                outHeaders.forEach(h => {
+                    if (h === 'competitor_price') {
+                        obj[h] = price ?? '';
+                    } else {
+                        obj[h] = r[h] ?? '';
+                    }
+                });
+                return obj;
+            });
+            const ws = XLSX.utils.json_to_sheet(data, { header: outHeaders });
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, sheetNameRef || 'Products');
+            return wb;
+        }
+
+        async function downloadUpdatedWorkbook(prebuiltBuffer) {
+            const wb = prebuiltBuffer ? null : buildUpdatedWorkbook();
+            const buffer = prebuiltBuffer || XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'products_with_prices.xlsx';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            alert('Downloaded updated workbook. Replace data/products.xlsx in your repo to apply.');
+        }
+        
+        function displayEmpty() {
+            dataContainer.innerHTML = '<div class="empty-state">No data found in the file.</div>';
+        }
+        
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+        function escapeAttr(text) {
+            return String(text).replace(/"/g, '&quot;');
         }
     </script>
 </body>
