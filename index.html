@@ -128,16 +128,17 @@
             color: #7f8c8d;
         }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
     <div class="header">
         <h1>Normal Prices Registry</h1>
-        <p>Display and browse CSV data files</p>
+        <p>Display and browse data files (CSV or Excel .xlsx)</p>
     </div>
     
     <div class="controls">
         <div class="file-selector">
-            <label for="csvFile">Select CSV File:</label>
+            <label for="csvFile">Select Data File:</label>
             <select id="csvFile">
                 <option value="">Choose a file...</option>
             </select>
@@ -148,14 +149,14 @@
     <div id="errorMessage"></div>
     <div id="dataContainer">
         <div class="empty-state">
-            Select a CSV file and click "Load Data" to display the contents.
+            Select a data file and click "Load Data" to display the contents.
         </div>
     </div>
 
     <script>
-        // Available CSV files (you can modify this list)
+        // Available data files (you can modify this list)
         const availableFiles = [
-            'data/sample.csv'
+            'data/products.xlsx'
         ];
         
         // Populate file selector
@@ -168,7 +169,7 @@
         availableFiles.forEach(file => {
             const option = document.createElement('option');
             option.value = file;
-            option.textContent = file.replace('data/', '').replace('.csv', '');
+            option.textContent = file.replace('data/', '');
             fileSelect.appendChild(option);
         });
         
@@ -181,10 +182,21 @@
         loadButton.addEventListener('click', function() {
             const selectedFile = fileSelect.value;
             if (selectedFile) {
-                loadCSV(selectedFile);
+                loadData(selectedFile);
             }
         });
         
+        // Decide loader based on file extension
+        function loadData(filePath) {
+            if (filePath.toLowerCase().endsWith('.csv')) {
+                loadCSV(filePath);
+            } else if (filePath.toLowerCase().endsWith('.xlsx')) {
+                loadXLSX(filePath);
+            } else {
+                errorMessage.innerHTML = `<div class="error">Unsupported file type. Please select a .csv or .xlsx file.</div>`;
+            }
+        }
+
         // CSV loading and parsing function
         async function loadCSV(filePath) {
             try {
@@ -208,6 +220,43 @@
                 
             } catch (error) {
                 console.error('Error loading CSV:', error);
+                errorMessage.innerHTML = `<div class="error">Error loading file: ${error.message}</div>`;
+                dataContainer.innerHTML = '<div class="empty-state">Failed to load data.</div>';
+            }
+        }
+
+        // XLSX loading and parsing function
+        async function loadXLSX(filePath) {
+            try {
+                // Show loading state
+                dataContainer.innerHTML = '<div class="loading">Loading data...</div>';
+                errorMessage.innerHTML = '';
+
+                // Fetch the XLSX file as ArrayBuffer
+                const response = await fetch(filePath);
+                if (!response.ok) {
+                    throw new Error(`Failed to load file: ${response.status} ${response.statusText}`);
+                }
+
+                const arrayBuffer = await response.arrayBuffer();
+                const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+
+                const firstSheetName = workbook.SheetNames[0];
+                const firstSheet = workbook.Sheets[firstSheetName];
+
+                // Convert to array of arrays, first row as headers
+                const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, blankrows: false });
+                if (!rows || rows.length === 0) {
+                    displayData({ headers: [], rows: [] });
+                    return;
+                }
+
+                const headers = rows[0].map(h => String(h ?? '').trim());
+                const dataRows = rows.slice(1).map(r => headers.map((_, idx) => String((r[idx] ?? '')).trim()));
+
+                displayData({ headers, rows: dataRows });
+            } catch (error) {
+                console.error('Error loading XLSX:', error);
                 errorMessage.innerHTML = `<div class="error">Error loading file: ${error.message}</div>`;
                 dataContainer.innerHTML = '<div class="empty-state">Failed to load data.</div>';
             }
