@@ -470,8 +470,12 @@
         });
 
         // Load button click handler
-        loadButton.addEventListener('click', function() {
-            loadData(DEFAULT_FILE);
+        loadButton.addEventListener('click', async function() {
+            if (!githubConfig.token) {
+                alert('Please connect to the repository first using your access token.');
+                return;
+            }
+            await loadData(DEFAULT_FILE);
         });
 
         // Sync button handler
@@ -492,45 +496,15 @@
             }
         });
         
-        // Decide loader based on file extension
-        function loadData(filePath) {
-            if (filePath.toLowerCase().endsWith('.csv')) {
-                loadCSV(filePath);
-            } else if (filePath.toLowerCase().endsWith('.xlsx')) {
-                loadXLSX(filePath);
+        // Load Excel data from GitHub
+        async function loadData(filePath) {
+            if (filePath.toLowerCase().endsWith('.xlsx')) {
+                await loadXLSX(filePath);
             } else {
-                errorMessage.innerHTML = `<div class="error">Unsupported file type. Please select a .csv or .xlsx file.</div>`;
+                errorMessage.innerHTML = `<div class="error">Only Excel (.xlsx) files are supported.</div>`;
             }
         }
 
-        // CSV loading and parsing function (kept for completeness)
-        async function loadCSV(filePath) {
-            try {
-                dataContainer.innerHTML = '<div class="loading">Loading data...</div>';
-                errorMessage.innerHTML = '';
-                const response = await fetch(filePath);
-                if (!response.ok) {
-                    throw new Error(`Failed to load file: ${response.status} ${response.statusText}`);
-                }
-                const csvText = await response.text();
-                const data = parseCSV(csvText);
-                headersRef = data.headers;
-                allRows = data.rows.map((row, idx) => rowToObject(headersRef, row, idx));
-                filteredRows = allRows;
-                workbookRef = null;
-                sheetNameRef = null;
-                dirtyById.clear();
-                errorById.clear();
-                currentPage = 1;
-                syncButton.disabled = false; // will fallback to download later
-                statusText.textContent = `Loaded ${allRows.length} rows`;
-                render();
-            } catch (error) {
-                console.error('Error loading CSV:', error);
-                errorMessage.innerHTML = `<div class="error">Error loading file: ${error.message}</div>`;
-                dataContainer.innerHTML = '<div class="empty-state">Failed to load data.</div>';
-            }
-        }
 
         // XLSX loading and parsing function - always from GitHub
         async function loadXLSX(filePath) {
@@ -603,15 +577,6 @@
             }
         }
         
-        function parseCSV(csvText) {
-            const lines = csvText.trim().split('\n');
-            if (lines.length === 0) {
-                return { headers: [], rows: [] };
-            }
-            const headers = lines[0].split(',').map(h => h.trim());
-            const rows = lines.slice(1).map(line => line.split(',').map(cell => cell.trim()));
-            return { headers, rows };
-        }
 
         function rowToObject(headers, row, idx) {
             const obj = {};
