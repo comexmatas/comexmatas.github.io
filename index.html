@@ -432,12 +432,31 @@
         function renderCell(header, value) {
             const headerLc = String(header || '').toLowerCase();
             const text = String(value ?? '');
-            if (headerLc === 'url' && text) {
-                const safeUrl = escapeAttr(text);
-                // Render thumbnail image wrapped by link, with fallback to text
-                return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer"><img src="${safeUrl}" class="thumb" onerror="this.onerror=null; this.replaceWith(Object.assign(document.createElement('a'), {href: '${safeUrl}', target: '_blank', rel: 'noopener noreferrer', textContent: 'link'}));" /></a>`;
+            
+            // Handle image columns (url, image, img, etc.)
+            if ((headerLc.includes('url') || headerLc.includes('URL') || headerLc.includes('img')) && text) {
+                // Check if it's a valid URL
+                if (isValidUrl(text)) {
+                    const safeUrl = escapeAttr(text);
+                    return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer"><img src="${safeUrl}" class="thumb" onerror="this.onerror=null; this.replaceWith(Object.assign(document.createElement('a'), {href: '${safeUrl}', target: '_blank', rel: 'noopener noreferrer', textContent: 'link'}));" /></a>`;
+                }
+                // If it's not a URL but contains image-related content, try to extract URL
+                const urlMatch = text.match(/https?:\/\/[^\s]+/i);
+                if (urlMatch) {
+                    const safeUrl = escapeAttr(urlMatch[0]);
+                    return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer"><img src="${safeUrl}" class="thumb" onerror="this.onerror=null; this.replaceWith(Object.assign(document.createElement('a'), {href: '${safeUrl}', target: '_blank', rel: 'noopener noreferrer', textContent: 'link'}));" /></a>`;
+                }
             }
             return escapeHtml(text);
+        }
+
+        function isValidUrl(string) {
+            try {
+                new URL(string);
+                return true;
+            } catch (_) {
+                return false;
+            }
         }
 
         function buildPagination(total, page, totalPages) {
