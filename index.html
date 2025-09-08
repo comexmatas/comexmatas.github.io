@@ -195,7 +195,7 @@
     
     <div class="controls">
         <div class="controls-row">
-            <input id="searchInput" class="search-input" type="search" placeholder="Search product_id, brand_name, product_name, product_category_name_level_1" />
+            <input id="searchInput" class="search-input" type="search" placeholder="Search Product ID, Brand, Product Name, Category" />
             <button id="loadButton" class="load-button">Load Data</button>
             <button id="syncButton" class="sync-button" disabled>Sync</button>
         </div>
@@ -379,7 +379,7 @@
                 return;
             }
             const q = query.toLowerCase();
-            const fields = ['product_id', 'brand_name', 'product_name', 'product_category_name_level_1'];
+            const fields = ['Product ID', 'Brand', 'Product', 'Category'];
             filteredRows = allRows.filter(r => fields.some(f => String(r[f] ?? '').toLowerCase().includes(q)));
         }
 
