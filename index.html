@@ -475,7 +475,14 @@
                 alert('Please connect to the repository first using your access token.');
                 return;
             }
-            await loadData(DEFAULT_FILE);
+            console.log('Loading data from:', DEFAULT_FILE);
+            console.log('GitHub config:', githubConfig);
+            try {
+                await loadData(DEFAULT_FILE);
+            } catch (error) {
+                console.error('Load data error:', error);
+                alert('Failed to load data: ' + error.message);
+            }
         });
 
         // Sync button handler
@@ -538,9 +545,15 @@
                 const data = await response.json();
                 lastCommitSha = data.sha;
                 
-                // Decode base64 content
+                // Decode base64 content - using same method as barcode scanner
                 const content = atob(data.content);
-                const arrayBuffer = new TextEncoder().encode(content).buffer;
+                
+                // Convert to ArrayBuffer for XLSX processing
+                const arrayBuffer = new ArrayBuffer(content.length);
+                const uint8Array = new Uint8Array(arrayBuffer);
+                for (let i = 0; i < content.length; i++) {
+                    uint8Array[i] = content.charCodeAt(i);
+                }
 
                 const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
 
@@ -792,8 +805,8 @@
                 const updatedWb = buildUpdatedWorkbook();
                 const buffer = XLSX.write(updatedWb, { type: 'array', bookType: 'xlsx' });
                 
-                // Convert to base64
-                const content = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+                // Convert to base64 using same method as barcode scanner - better encoding for special characters
+                const content = btoa(unescape(encodeURIComponent(String.fromCharCode(...new Uint8Array(buffer)))));
                 
                 const message = `Update competitor prices - ${dirtyById.size} changes at ${new Date().toLocaleString()}`;
                 
