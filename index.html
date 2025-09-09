@@ -275,10 +275,9 @@
         }
 
         .github-inputs {
-            display: grid;
-            grid-template-columns: 1fr 1fr 2fr auto;
+            display: flex;
             gap: 10px;
-            align-items: end;
+            align-items: center;
         }
 
         .github-inputs input {
@@ -376,12 +375,10 @@
     <div id="githubSetup" class="github-setup">
         <h3>🔧 GitHub Configuration</h3>
         <div class="setup-instructions">
-            <p><strong>Quick Setup:</strong> Create a GitHub Personal Access Token with <code>repo</code> scope, then enter your details below.</p>
+            <p><strong>Quick Setup:</strong> Create a GitHub Personal Access Token with <code>repo</code> scope and enter it below. We'll automatically use your current repository.</p>
         </div>
         <div class="github-inputs">
-            <input type="text" id="githubUsername" placeholder="GitHub Username" />
-            <input type="text" id="githubRepo" placeholder="Repository Name" />
-            <input type="password" id="githubToken" placeholder="Personal Access Token (ghp_...)" />
+            <input type="password" id="githubToken" placeholder="Personal Access Token (ghp_...)" style="flex: 1;" />
             <button id="connectGitHub" class="github-connect-btn">Connect to GitHub</button>
         </div>
         <div id="githubSetupStatus" class="status-message" style="display: none;"></div>
@@ -498,11 +495,13 @@
         
         // Decide loader based on file extension
         function loadData(filePath) {
+            console.log('Loading data from local file:', filePath);
             if (filePath.toLowerCase().endsWith('.csv')) {
                 loadCSV(filePath);
             } else if (filePath.toLowerCase().endsWith('.xlsx')) {
                 loadXLSX(filePath);
             } else {
+                console.error('Unsupported file type:', filePath);
                 errorMessage.innerHTML = `<div class="error">Unsupported file type. Please select a .csv or .xlsx file.</div>`;
             }
         }
@@ -539,10 +538,13 @@
         // XLSX loading and parsing function
         async function loadXLSX(filePath) {
             try {
+                console.log('Starting XLSX load for:', filePath);
                 dataContainer.innerHTML = '<div class="loading">Loading data...</div>';
                 errorMessage.innerHTML = '';
 
+                console.log('Fetching file from:', filePath);
                 const response = await fetch(filePath);
+                console.log('Local file fetch response status:', response.status);
                 if (!response.ok) {
                     throw new Error(`Failed to load file: ${response.status} ${response.statusText}`);
                 }
@@ -755,21 +757,57 @@
         
         // GitHub API functions
         async function connectToGitHub() {
-            const username = document.getElementById('githubUsername').value.trim();
-            const repo = document.getElementById('githubRepo').value.trim();
             const token = document.getElementById('githubToken').value.trim();
 
-            if (!username || !repo || !token) {
-                showStatus('githubSetupStatus', 'Please fill in all fields', 'error');
+            if (!token) {
+                showStatus('githubSetupStatus', 'Please enter your GitHub Personal Access Token', 'error');
                 return;
             }
 
-            githubConfig = { username, repo, token, branch: 'main' };
-
             showStatus('githubSetupStatus', '🔄 Connecting to GitHub...', 'info');
+            console.log('Starting GitHub connection...');
 
             try {
+                // Auto-detect current repository from page URL
+                const currentUrl = window.location.href;
+                console.log('Current URL:', currentUrl);
+                
+                // Extract username and repo from GitHub Pages URL
+                let username, repo;
+                if (currentUrl.includes('.github.io')) {
+                    const match = currentUrl.match(/https?:\/\/([^.]+)\.github\.io/);
+                    if (match) {
+                        username = match[1];
+                        repo = `${username}.github.io`;
+                        console.log('Detected GitHub Pages repo:', { username, repo });
+                    }
+                }
+                
+                // Fallback: get authenticated user info
+                if (!username) {
+                    console.log('Getting user info from GitHub API...');
+                    const userResponse = await fetch('https://api.github.com/user', {
+                        headers: {
+                            'Authorization': `token ${token}`,
+                            'Accept': 'application/vnd.github.v3+json'
+                        }
+                    });
+                    
+                    if (userResponse.ok) {
+                        const userData = await userResponse.json();
+                        username = userData.login;
+                        repo = `${username}.github.io`;
+                        console.log('Got user from API:', { username, repo });
+                    } else {
+                        throw new Error('Invalid GitHub token or insufficient permissions');
+                    }
+                }
+
+                githubConfig = { username, repo, token, branch: 'main' };
+                console.log('GitHub config set:', { username, repo, branch: 'main' });
+
                 // Test connection by getting repo info
+                console.log('Testing repository connection...');
                 const response = await fetch(`https://api.github.com/repos/${username}/${repo}`, {
                     headers: {
                         'Authorization': `token ${token}`,
@@ -777,31 +815,41 @@
                     }
                 });
 
+                console.log('Repository check response status:', response.status);
+
                 if (response.status === 404) {
-                    // Repo doesn't exist, try to create it
+                    console.log('Repository not found, attempting to create...');
                     await createRepository();
                 } else if (response.ok) {
-                    // Repo exists
+                    const repoData = await response.json();
+                    console.log('Repository found:', repoData.name);
+                    
+                    // Save config
                     localStorage.setItem('githubConfig', JSON.stringify({ username, repo }));
                     
                     // Show main app
                     document.getElementById('githubSetup').style.display = 'none';
                     document.getElementById('mainControls').style.display = 'block';
                     document.getElementById('githubStatus').style.display = 'block';
-                    document.getElementById('connectionStatus').innerHTML = '✅ Connected to GitHub';
+                    document.getElementById('connectionStatus').innerHTML = `✅ Connected to ${username}/${repo}`;
                     document.getElementById('githubStatus').className = 'github-status connected';
                     
                     showStatus('githubSetupStatus', '✅ Connected! You can now load and sync data.', 'success');
+                    console.log('Successfully connected to GitHub');
                 } else {
-                    throw new Error('Failed to connect to repository');
+                    const errorData = await response.json();
+                    console.error('Repository check failed:', errorData);
+                    throw new Error('Failed to connect to repository: ' + (errorData.message || 'Unknown error'));
                 }
             } catch (error) {
+                console.error('GitHub connection error:', error);
                 showStatus('githubSetupStatus', `❌ Error: ${error.message}`, 'error');
             }
         }
 
         async function createRepository() {
             showStatus('githubSetupStatus', '🔄 Creating repository...', 'info');
+            console.log('Creating repository:', githubConfig.repo);
             
             const response = await fetch('https://api.github.com/user/repos', {
                 method: 'POST',
@@ -818,7 +866,12 @@
                 })
             });
 
+            console.log('Create repository response status:', response.status);
+
             if (response.ok) {
+                const repoData = await response.json();
+                console.log('Repository created:', repoData.name);
+                
                 localStorage.setItem('githubConfig', JSON.stringify({ 
                     username: githubConfig.username, 
                     repo: githubConfig.repo 
@@ -827,48 +880,76 @@
                 document.getElementById('githubSetup').style.display = 'none';
                 document.getElementById('mainControls').style.display = 'block';
                 document.getElementById('githubStatus').style.display = 'block';
-                document.getElementById('connectionStatus').innerHTML = '✅ Connected to GitHub';
+                document.getElementById('connectionStatus').innerHTML = `✅ Connected to ${githubConfig.username}/${githubConfig.repo}`;
                 document.getElementById('githubStatus').className = 'github-status connected';
                 
                 showStatus('githubSetupStatus', '✅ Repository created and connected!', 'success');
+                console.log('Repository creation successful');
             } else {
-                throw new Error('Failed to create repository');
+                const errorData = await response.json();
+                console.error('Repository creation failed:', errorData);
+                throw new Error('Failed to create repository: ' + (errorData.message || 'Unknown error'));
             }
         }
 
         async function loadDataFromGitHub() {
             if (!githubConfig.token) {
+                console.error('No GitHub token available');
                 throw new Error('Not connected to GitHub');
             }
+
+            console.log('Loading data from GitHub...', {
+                username: githubConfig.username,
+                repo: githubConfig.repo,
+                file: DEFAULT_FILE
+            });
 
             showStatus('githubSetupStatus', '🔄 Loading data from GitHub...', 'info');
 
             try {
-                const response = await fetch(
-                    `https://api.github.com/repos/${githubConfig.username}/${githubConfig.repo}/contents/${DEFAULT_FILE}`,
-                    {
-                        headers: {
-                            'Authorization': `token ${githubConfig.token}`,
-                            'Accept': 'application/vnd.github.v3+json'
-                        }
+                const url = `https://api.github.com/repos/${githubConfig.username}/${githubConfig.repo}/contents/${DEFAULT_FILE}`;
+                console.log('Fetching from URL:', url);
+                
+                const response = await fetch(url, {
+                    headers: {
+                        'Authorization': `token ${githubConfig.token}`,
+                        'Accept': 'application/vnd.github.v3+json'
                     }
-                );
+                });
+
+                console.log('GitHub fetch response status:', response.status);
 
                 if (response.ok) {
                     const data = await response.json();
+                    console.log('GitHub file data received:', {
+                        name: data.name,
+                        size: data.size,
+                        sha: data.sha
+                    });
+                    
                     lastCommitSha = data.sha;
                     
                     // Decode base64 content
+                    console.log('Decoding base64 content...');
                     const content = atob(data.content);
+                    console.log('Decoded content length:', content.length);
+                    
                     const arrayBuffer = Uint8Array.from(content, c => c.charCodeAt(0)).buffer;
+                    console.log('Array buffer created, size:', arrayBuffer.byteLength);
                     
                     // Parse Excel file
+                    console.log('Parsing Excel file...');
                     const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+                    console.log('Workbook sheets:', workbook.SheetNames);
+                    
                     const firstSheetName = workbook.SheetNames[0];
                     const firstSheet = workbook.Sheets[firstSheetName];
                     const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, blankrows: false });
+                    console.log('Parsed rows count:', rows.length);
+                    console.log('First few rows:', rows.slice(0, 3));
                     
                     if (!rows || rows.length === 0) {
+                        console.log('No data found in Excel file');
                         headersRef = [];
                         allRows = [];
                         filteredRows = [];
@@ -878,6 +959,8 @@
 
                     const headers = rows[0].map(h => String(h ?? '').trim());
                     const dataRows = rows.slice(1).map(r => headers.map((_, idx) => String((r[idx] ?? '')).trim()));
+                    console.log('Headers:', headers);
+                    console.log('Data rows count:', dataRows.length);
 
                     headersRef = headers;
                     allRows = dataRows.map((row, idx) => rowToObject(headersRef, row, idx));
@@ -889,19 +972,25 @@
                     currentPage = 1;
                     syncButton.disabled = false;
                     statusText.textContent = `Loaded ${allRows.length} rows from GitHub`;
+                    console.log('Calling render()...');
                     render();
                     
                     showStatus('githubSetupStatus', '✅ Data loaded from GitHub', 'success');
+                    console.log('GitHub data loading completed successfully');
                 } else if (response.status === 404) {
+                    console.log('File not found on GitHub, loading local file...');
                     // File doesn't exist yet, load local file
                     loadData(DEFAULT_FILE);
                 } else {
-                    throw new Error('Failed to load data from GitHub');
+                    const errorData = await response.text();
+                    console.error('GitHub load failed:', response.status, errorData);
+                    throw new Error(`Failed to load data from GitHub (${response.status}): ${errorData}`);
                 }
             } catch (error) {
                 console.error('GitHub load error:', error);
                 showStatus('githubSetupStatus', `❌ Error loading from GitHub: ${error.message}`, 'error');
                 // Fallback to local file
+                console.log('Falling back to local file...');
                 loadData(DEFAULT_FILE);
             }
         }
@@ -1063,8 +1152,9 @@
             const savedConfig = localStorage.getItem('githubConfig');
             if (savedConfig) {
                 const config = JSON.parse(savedConfig);
-                document.getElementById('githubUsername').value = config.username;
-                document.getElementById('githubRepo').value = config.repo;
+                // Only show if we have saved config - user still needs to enter token
+                console.log('Found saved GitHub config:', config);
+                showStatus('githubSetupStatus', 'Previous connection found. Enter your token to reconnect.', 'info');
             }
 
             const savedSyncTime = localStorage.getItem('lastSyncTime');
