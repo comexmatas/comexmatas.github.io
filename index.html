@@ -1397,7 +1397,7 @@
                     // Parse CSV with explicit delimiter
                     parsed = Papa.parse(content, {
                         header: true,
-                        delimiter: ',',
+                        delimiter: ';',
                         dynamicTyping: false,
                         skipEmptyLines: true,
                         encoding: 'UTF-8'
@@ -1797,7 +1797,7 @@
                     // Parse CSV with explicit delimiter
                     const parsed = Papa.parse(content, {
                         header: true,
-                        delimiter: ',',
+                        delimiter: ';',
                         dynamicTyping: false,
                         skipEmptyLines: true,
                         encoding: 'UTF-8'
@@ -1942,8 +1942,10 @@
             // Add sync timestamp to all records
             const syncTimestamp = new Date().toISOString();
             
-            // Convert database to CSV
-            const csv = Papa.unparse(allRows);
+            // Convert database to CSV with semicolon delimiter
+            const csv = Papa.unparse(allRows, {
+                delimiter: ';'
+            });
             const content = btoa(unescape(encodeURIComponent(csv))); // Better encoding for special characters
             
             const message = `Sync at ${new Date().toLocaleString()}`;
