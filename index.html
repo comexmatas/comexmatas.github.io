@@ -825,6 +825,12 @@
                 // Don't add existing prices to dirtyById - they should come from CSV data directly
                 // Only user session changes should go into dirtyById and localChanges
                 
+                // Debug: Log initial state
+                debugLog('After CSV load - before draft restore', {
+                    dirtyByIdSize: dirtyById.size,
+                    localChangesSize: localChanges.size
+                });
+                
                 currentPage = 1;
                 syncButton.disabled = false;
                 statusText.textContent = `Loaded ${allRows.length} rows`;
@@ -1450,16 +1456,44 @@
                     searchInput.select();
                 }
             }
+            
+            // Ctrl+D or Cmd+D clears draft data (debug function)
+            if ((event.ctrlKey || event.metaKey) && event.key === 'd') {
+                event.preventDefault();
+                clearProblemDraftData();
+            }
         });
+
+        // Debug function to clear potentially problematic draft data
+        function clearProblemDraftData() {
+            localStorage.removeItem('priceDraft');
+            dirtyById.clear();
+            localChanges.clear();
+            console.log('Cleared draft data and local changes');
+            render();
+            alert('Draft data cleared. Try refreshing the page.');
+        }
 
         // Auto-save drafts to localStorage
         function saveDraft() {
-            if (dirtyById.size > 0) {
-                const draftData = {
-                    changes: Object.fromEntries(dirtyById),
-                    timestamp: new Date().toISOString()
-                };
-                localStorage.setItem('priceDraft', JSON.stringify(draftData));
+            // Only save changes that are actual user session modifications
+            if (localChanges.size > 0) {
+                const userChanges = {};
+                for (const key of localChanges) {
+                    if (dirtyById.has(key)) {
+                        userChanges[key] = dirtyById.get(key);
+                    }
+                }
+                
+                if (Object.keys(userChanges).length > 0) {
+                    const draftData = {
+                        changes: userChanges,
+                        timestamp: new Date().toISOString()
+                    };
+                    localStorage.setItem('priceDraft', JSON.stringify(draftData));
+                } else {
+                    localStorage.removeItem('priceDraft');
+                }
             } else {
                 localStorage.removeItem('priceDraft');
             }
@@ -1474,13 +1508,23 @@
                     
                     // Only restore draft if it's less than 24 hours old
                     if (draftAge < 24 * 60 * 60 * 1000) {
+                        // Only restore draft changes that are actual user modifications
+                        // (not existing prices from CSV)
                         Object.entries(draftData.changes).forEach(([key, value]) => {
-                            dirtyById.set(key, value);
-                            localChanges.add(key); // Also restore to localChanges tracking
+                            // Check if this is actually different from the original CSV value
+                            const originalRow = allRows.find(row => row.__id === key);
+                            const originalPrice = originalRow ? (originalRow['competitor_price'] || '') : '';
+                            
+                            // Only restore if the draft value is different from original CSV
+                            if (value !== originalPrice) {
+                                dirtyById.set(key, value);
+                                localChanges.add(key);
+                                debugLog('Restored draft change', { key, originalPrice, draftValue: value });
+                            }
                         });
                         
-                        if (dirtyById.size > 0) {
-                            statusText.textContent += ` • Draft restored: ${dirtyById.size} unsaved changes`;
+                        if (localChanges.size > 0) {
+                            statusText.textContent += ` • Draft restored: ${localChanges.size} unsaved changes`;
                             render();
                         }
                     } else {
