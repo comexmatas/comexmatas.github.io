@@ -1196,26 +1196,15 @@
                         priceColumnIndex = headers.length - 1;
                     }
                     
-                    // Add lastSyncedAt column for tracking
-                    let syncColumnIndex = headers.findIndex(h => 
-                        String(h || '').toLowerCase().includes('lastsyncedAt')
-                    );
-                    
-                    if (syncColumnIndex === -1) {
-                        headers.push('lastSyncedAt');
-                        syncColumnIndex = headers.length - 1;
-                    }
-                    
                     const dataRows = allRows.map(row => {
                         const dataRow = headers.map(h => row[h] || '');
                         const rowId = row.__id;
                         
-                        // Apply user session changes and mark sync time
+                        // Apply user session changes
                         if (localChanges.has(rowId) && dirtyById.has(rowId)) {
                             dataRow[priceColumnIndex] = dirtyById.get(rowId);
-                            dataRow[syncColumnIndex] = syncTimestamp; // Mark when we synced this change
                         } else if (row['competitor_price']) {
-                            // Keep existing price from CSV but don't mark as synced (it wasn't a user change)
+                            // Keep existing price from CSV
                             dataRow[priceColumnIndex] = row['competitor_price'];
                         }
                         
@@ -1250,17 +1239,6 @@
                 debugLog('Found existing competitor_price column at index', priceColumnIndex);
             }
             
-            // Find or add lastSyncedAt column for tracking
-            let syncColumnIndex = headers.findIndex(h => 
-                String(h || '').toLowerCase().includes('lastsyncedAt')
-            );
-            
-            if (syncColumnIndex === -1) {
-                headers.push('lastSyncedAt');
-                syncColumnIndex = headers.length - 1;
-                debugLog('Added lastSyncedAt column at index', syncColumnIndex);
-            }
-            
             // Update data rows with smart merging
             const updatedDataRows = dataRows.map((row, idx) => {
                 const rowObj = rowToObject(headers, row, idx);
@@ -1280,7 +1258,6 @@
                         newValue: dirtyById.get(rowId) 
                     });
                     extendedRow[priceColumnIndex] = dirtyById.get(rowId);
-                    extendedRow[syncColumnIndex] = syncTimestamp; // Mark sync timestamp for user changes
                 }
                 // Note: Existing prices from remote CSV are preserved as-is
                 
@@ -1308,12 +1285,9 @@
             const headers = remoteData[0] || [];
             const dataRows = remoteData.slice(1);
             
-            // Find competitor_price and lastSyncedAt columns
+            // Find competitor_price column
             const priceColumnIndex = headers.findIndex(h => 
                 String(h || '').toLowerCase().includes('competitor_price')
-            );
-            const syncColumnIndex = headers.findIndex(h => 
-                String(h || '').toLowerCase().includes('lastsyncedAt')
             );
             
             if (priceColumnIndex === -1) {
@@ -1328,26 +1302,14 @@
                 if (localChanges.has(rowId) && dirtyById.has(rowId)) {
                     const remotePrice = row[priceColumnIndex] || '';
                     const localPrice = dirtyById.get(rowId) || '';
-                    const remoteSyncTime = syncColumnIndex !== -1 ? row[syncColumnIndex] : '';
                     
-                    // Check if remote has been modified since our last sync
+                    // Warn if remote has a different price than local change
                     if (remotePrice && remotePrice !== localPrice) {
-                        let shouldWarn = true;
-                        
-                        if (remoteSyncTime && lastSyncTime) {
-                            const remoteSync = new Date(remoteSyncTime);
-                            const ourLastSync = new Date(lastSyncTime);
-                            // Only warn if remote was modified after our last sync
-                            shouldWarn = remoteSync > ourLastSync;
-                        }
-                        
-                        if (shouldWarn) {
-                            overwrites.push({
-                                id: rowId,
-                                oldPrice: remotePrice,
-                                newPrice: localPrice
-                            });
-                        }
+                        overwrites.push({
+                            id: rowId,
+                            oldPrice: remotePrice,
+                            newPrice: localPrice
+                        });
                     }
                 }
             });
