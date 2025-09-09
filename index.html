@@ -1375,14 +1375,32 @@
                     const data = await response.json();
                     lastCommitSha = data.sha;
                     
-                    // Decode base64 content
-                    const content = atob(data.content);
+                    // Decode base64 content (GitHub API returns content with newlines that need to be removed)
+                    const cleanContent = data.content.replace(/\s/g, '');
+                    let content;
+                    try {
+                        // Use a more robust decoding approach for UTF-8 content
+                        const binaryString = atob(cleanContent);
+                        const bytes = new Uint8Array(binaryString.length);
+                        for (let i = 0; i < binaryString.length; i++) {
+                            bytes[i] = binaryString.charCodeAt(i);
+                        }
+                        content = new TextDecoder('utf-8').decode(bytes);
+                    } catch (e) {
+                        debugLog('UTF-8 decoding failed, falling back to simple atob:', e);
+                        content = atob(cleanContent);
+                    }
                     
-                    // Parse CSV
+                    debugLog('Raw content sample (first 200 chars):', content.substring(0, 200));
+                    debugLog('Content length:', content.length);
+                    
+                    // Parse CSV with explicit delimiter
                     parsed = Papa.parse(content, {
                         header: true,
+                        delimiter: ',',
                         dynamicTyping: false,
-                        skipEmptyLines: true
+                        skipEmptyLines: true,
+                        encoding: 'UTF-8'
                     });
                 
                     debugLog('CSV parsed successfully', {
@@ -1760,14 +1778,29 @@
                     const data = await response.json();
                     lastCommitSha = data.sha;
                     
-                    // Decode base64 content
-                    const content = atob(data.content);
+                    // Decode base64 content (GitHub API returns content with newlines that need to be removed)
+                    const cleanContent = data.content.replace(/\s/g, '');
+                    let content;
+                    try {
+                        // Use a more robust decoding approach for UTF-8 content
+                        const binaryString = atob(cleanContent);
+                        const bytes = new Uint8Array(binaryString.length);
+                        for (let i = 0; i < binaryString.length; i++) {
+                            bytes[i] = binaryString.charCodeAt(i);
+                        }
+                        content = new TextDecoder('utf-8').decode(bytes);
+                    } catch (e) {
+                        debugLog('UTF-8 decoding failed, falling back to simple atob:', e);
+                        content = atob(cleanContent);
+                    }
                     
-                    // Parse CSV
+                    // Parse CSV with explicit delimiter
                     const parsed = Papa.parse(content, {
                         header: true,
+                        delimiter: ',',
                         dynamicTyping: false,
-                        skipEmptyLines: true
+                        skipEmptyLines: true,
+                        encoding: 'UTF-8'
                     });
                     
                     remoteDatabase = parsed.data.map((row, idx) => {
