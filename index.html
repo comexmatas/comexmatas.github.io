@@ -1024,7 +1024,7 @@
     <div class="controls">
         <div class="controls-row">
             <input id="searchInput" class="search-input" type="search" placeholder="Search Product, Brand, Category" inputmode="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
-            <button id="loadButton" class="load-button">Load Data</button>
+            <button id="loadButton" class="load-button">Load from GitHub</button>
             <button id="syncButton" class="sync-button" disabled>Sync</button>
         </div>
         <div class="status-bar">
@@ -1038,7 +1038,7 @@
     <div id="errorMessage"></div>
     <div id="dataContainer">
         <div class="empty-state">
-            Click "Load Data" to display the contents.
+            Please authenticate and click "Load Data" to display the contents from GitHub.
         </div>
     </div>
 
@@ -1163,11 +1163,7 @@
             
             // Enhanced button event handling for mobile
             addMobileButtonHandler(loadButton, function() {
-                if (isAuthenticated) {
-                    loadDataFromGitHub();
-                } else {
-                    loadData(DEFAULT_FILE); // Fallback to local file if not authenticated
-                }
+                loadDataFromGitHub();
             });
 
             addMobileButtonHandler(syncButton, async () => {
@@ -1345,13 +1341,6 @@
             }, 100);
         }
 
-        function loadData(filePath) {
-            if (filePath.toLowerCase().endsWith('.csv')) {
-                loadCSV(filePath);
-            } else {
-                errorMessage.innerHTML = `<div class="error">Unsupported file type. Please select a .csv file.</div>`;
-            }
-        }
 
         async function loadDataFromGitHub() {
             if (!authToken) {
@@ -1419,74 +1408,6 @@
             }
         }
 
-        async function loadCSV(filePath) {
-            try {
-                dataContainer.innerHTML = '<div class="loading">Loading data...</div>';
-                errorMessage.innerHTML = '';
-                debugLog('Starting to load CSV file', filePath);
-
-                const response = await fetch(filePath);
-                if (!response.ok) {
-                    throw new Error(`Failed to load file: ${response.status} ${response.statusText}`);
-                }
-
-                const csvText = await response.text();
-                debugLog('File loaded, size:', csvText.length);
-                
-                // Parse CSV using Papa Parse
-                const parsed = Papa.parse(csvText, {
-                    header: false,
-                    dynamicTyping: false,
-                    skipEmptyLines: true
-                });
-                
-                debugLog('CSV parsed, rows:', parsed.data.length);
-
-                if (!parsed.data || parsed.data.length === 0) {
-                    headersRef = [];
-                    allRows = [];
-                    filteredRows = [];
-                    displayEmpty();
-                    return;
-                }
-
-                const headers = parsed.data[0].map(h => String(h ?? '').trim()).filter(h => h);
-                const dataRows = parsed.data.slice(1).map(r => headers.map((_, idx) => String((r[idx] ?? '')).trim()));
-
-                debugLog('Headers:', headers);
-                debugLog('Data rows count:', dataRows.length);
-
-                headersRef = headers;
-                allRows = dataRows.map((row, idx) => rowToObject(headersRef, row, idx));
-                filteredRows = allRows;
-                dirtyById.clear();
-                errorById.clear();
-                localChanges.clear();
-                
-                // Don't add existing prices to dirtyById - they should come from CSV data directly
-                // Only user session changes should go into dirtyById and localChanges
-                
-                // Debug: Log initial state
-                debugLog('After CSV load - before draft restore', {
-                    dirtyByIdSize: dirtyById.size,
-                    localChangesSize: localChanges.size
-                });
-                
-                currentPage = 1;
-                syncButton.disabled = false;
-                statusText.textContent = `Loaded ${allRows.length} rows from local file`;
-                
-                // Try to restore any saved drafts
-                loadDraft();
-                
-                render();
-            } catch (error) {
-                console.error('Error loading CSV:', error);
-                debugLog('Error loading CSV:', error.message);
-                errorMessage.innerHTML = `<div class="error">Error loading file: ${error.message}</div>`;
-                dataContainer.innerHTML = '<div class="empty-state">Failed to load data.</div>';
-            }
-        }
 
         function rowToObject(headers, row, idx) {
             const obj = {};
