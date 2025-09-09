@@ -1056,7 +1056,7 @@
         const GITHUB_OWNER = 'comexmatas';
         const GITHUB_REPO = 'comexmatas.github.io';
         const SESSION_KEY = 'github_token';
-        const DEBUG = false; // Set to true for debugging
+        const DEBUG = true; // Set to true for debugging
         
         // UI elements
         const loadButton = document.getElementById('loadButton');
@@ -1372,7 +1372,7 @@
                 
                 // Parse CSV using Papa Parse
                 const parsed = Papa.parse(csvText, {
-                    header: false,
+                    header: true,
                     dynamicTyping: false,
                     skipEmptyLines: true
                 });
@@ -1387,14 +1387,33 @@
                     return;
                 }
 
-                const headers = parsed.data[0].map(h => String(h ?? '').trim()).filter(h => h);
-                const dataRows = parsed.data.slice(1).map(r => headers.map((_, idx) => String((r[idx] ?? '')).trim()));
-
+                // Extract headers from the parsed data
+                const headers = Object.keys(parsed.data[0] || {});
                 debugLog('Headers:', headers);
-                debugLog('Data rows count:', dataRows.length);
+                debugLog('Data rows count:', parsed.data.length);
 
                 headersRef = headers;
-                allRows = dataRows.map((row, idx) => rowToObject(headersRef, row, idx));
+                allRows = parsed.data.map((row, idx) => {
+                    const obj = {};
+                    headers.forEach(key => {
+                        obj[key] = String(row[key] || '');
+                    });
+                    obj.__rowIndex = idx;
+                    
+                    // Try multiple ways to find product ID
+                    const productIdFields = ['product_id', 'Product ID', 'productid', 'id', 'ID'];
+                    let productId = '';
+                    
+                    for (const field of productIdFields) {
+                        if (obj[field] && String(obj[field]).trim()) {
+                            productId = String(obj[field]).trim();
+                            break;
+                        }
+                    }
+                    
+                    obj.__id = productId || `row_${idx}`;
+                    return obj;
+                }).filter(item => item.__id);
                 filteredRows = allRows;
                 dirtyById.clear();
                 errorById.clear();
