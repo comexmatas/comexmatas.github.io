@@ -1030,6 +1030,7 @@
         <div class="status-bar">
             <span id="statusText">No data loaded.</span>
             <span id="dirtyText"></span>
+            <span id="keyboardHints" style="font-size: 11px; color: #7f8c8d; margin-left: 15px;">💡 Ctrl+S to sync • Ctrl+L to search</span>
         </div>
         <div id="debugInfo" class="debug-info" style="display: none;"></div>
     </div>
@@ -1461,7 +1462,7 @@
             // Define mobile-friendly column order: Image URL, Product, Price, Brand, Category
             const preferredOrder = [
                 'Image URL', 'image_url', 'imageurl', 'image',
-                'Product', 'product', 'Product Name', 'product_name', 'productname',
+                'Product', 
                 'Price',
                 'Brand', 'brand',
                 'Category', 'category'
@@ -1521,8 +1522,15 @@
                 const rowClass = isDirty ? ' class="row-dirty"' : '';
                 
                 const cells = finalHeaders.map(h => {
-                    if (h === 'Price') {
-                        // Render Price as editable input
+                    const headerLc = String(h || '').toLowerCase();
+                    // Check if this is a price column that should be editable
+                    const isPriceColumn = headerLc === 'price' || 
+                                        headerLc === 'competitor_price' || 
+                                        headerLc === 'competitor price' ||
+                                        headerLc === 'competitorprice';
+                    
+                    if (isPriceColumn) {
+                        // Render price as editable input
                         const priceInputClass = errorById.has(rowId) ? 'price-input cell-error' : 'price-input';
                         return `<td><input type="text" inputmode="decimal" pattern="[0-9]*" class="${priceInputClass}" data-rowid="${escapeAttr(rowId)}" value="${escapeAttr(priceVal)}" placeholder="0.00" /></td>`;
                     } else {
@@ -1788,7 +1796,9 @@
                     
                     // Apply local price changes
                     if (dirtyById.has(itemId)) {
+                        // Set price in both the new preferred column name and legacy column for compatibility
                         updatedItem.Price = dirtyById.get(itemId);
+                        updatedItem.competitor_price = dirtyById.get(itemId);
                     }
                     
                     // Add sync timestamp (but filter it out from display)
@@ -2162,7 +2172,7 @@
                         Object.entries(draftData.changes).forEach(([key, value]) => {
                             // Check if this is actually different from the original CSV value
                             const originalRow = allRows.find(row => row.__id === key);
-                            const originalPrice = originalRow ? (originalRow['Price'] || '') : '';
+                            const originalPrice = originalRow ? (originalRow['Price'] || originalRow['price'] || originalRow['competitor_price'] || '') : '';
                             
                             // Only restore if the draft value is different from original CSV
                             if (value !== originalPrice) {
