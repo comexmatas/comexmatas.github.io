@@ -1375,24 +1375,52 @@
                     const data = await response.json();
                     lastCommitSha = data.sha;
                     
-                    // Decode base64 content (GitHub API returns content with newlines that need to be removed)
-                    const cleanContent = data.content.replace(/\s/g, '');
+                    debugLog('GitHub response data:', {
+                        size: data.size,
+                        encoding: data.encoding,
+                        hasContent: !!data.content,
+                        downloadUrl: data.download_url
+                    });
+                    
                     let content;
-                    try {
-                        // Use a more robust decoding approach for UTF-8 content
-                        const binaryString = atob(cleanContent);
-                        const bytes = new Uint8Array(binaryString.length);
-                        for (let i = 0; i < binaryString.length; i++) {
-                            bytes[i] = binaryString.charCodeAt(i);
+                    
+                    // Check if file is too large for direct content API (>1MB)
+                    if (data.size > 1000000 || !data.content) {
+                        debugLog('File too large for content API, using download URL');
+                        
+                        // Use raw download URL for large files
+                        const downloadResponse = await fetch(data.download_url, {
+                            headers: {
+                                'Authorization': `token ${authToken}`
+                            }
+                        });
+                        
+                        if (downloadResponse.ok) {
+                            content = await downloadResponse.text();
+                            debugLog('Downloaded file successfully, size:', content.length);
+                        } else {
+                            throw new Error(`Failed to download large file: ${downloadResponse.status}`);
                         }
-                        content = new TextDecoder('utf-8').decode(bytes);
-                    } catch (e) {
-                        debugLog('UTF-8 decoding failed, falling back to simple atob:', e);
-                        content = atob(cleanContent);
+                    } else {
+                        // Small file, use base64 content
+                        debugLog('Using base64 content for small file');
+                        const cleanContent = data.content.replace(/\s/g, '');
+                        
+                        try {
+                            const binaryString = atob(cleanContent);
+                            const bytes = new Uint8Array(binaryString.length);
+                            for (let i = 0; i < binaryString.length; i++) {
+                                bytes[i] = binaryString.charCodeAt(i);
+                            }
+                            content = new TextDecoder('utf-8').decode(bytes);
+                        } catch (e) {
+                            debugLog('UTF-8 decoding failed, falling back to simple atob:', e);
+                            content = atob(cleanContent);
+                        }
                     }
                     
-                    debugLog('Raw content sample (first 200 chars):', content.substring(0, 200));
-                    debugLog('Content length:', content.length);
+                    debugLog('Final content sample (first 200 chars):', content.substring(0, 200));
+                    debugLog('Final content length:', content.length);
                     
                     // Parse CSV with explicit delimiter
                     parsed = Papa.parse(content, {
@@ -1762,7 +1790,7 @@
 
                 // Step 1: Load from GitHub
                 const response = await fetch(
-                    `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/products.csv`,
+                    `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`,
                     {
                         headers: {
                             'Authorization': `token ${authToken}`,
@@ -1778,20 +1806,36 @@
                     const data = await response.json();
                     lastCommitSha = data.sha;
                     
-                    // Decode base64 content (GitHub API returns content with newlines that need to be removed)
-                    const cleanContent = data.content.replace(/\s/g, '');
                     let content;
-                    try {
-                        // Use a more robust decoding approach for UTF-8 content
-                        const binaryString = atob(cleanContent);
-                        const bytes = new Uint8Array(binaryString.length);
-                        for (let i = 0; i < binaryString.length; i++) {
-                            bytes[i] = binaryString.charCodeAt(i);
+                    
+                    // Check if file is too large for direct content API (>1MB)
+                    if (data.size > 1000000 || !data.content) {
+                        // Use raw download URL for large files
+                        const downloadResponse = await fetch(data.download_url, {
+                            headers: {
+                                'Authorization': `token ${authToken}`
+                            }
+                        });
+                        
+                        if (downloadResponse.ok) {
+                            content = await downloadResponse.text();
+                        } else {
+                            throw new Error(`Failed to download large file: ${downloadResponse.status}`);
                         }
-                        content = new TextDecoder('utf-8').decode(bytes);
-                    } catch (e) {
-                        debugLog('UTF-8 decoding failed, falling back to simple atob:', e);
-                        content = atob(cleanContent);
+                    } else {
+                        // Small file, use base64 content
+                        const cleanContent = data.content.replace(/\s/g, '');
+                        try {
+                            const binaryString = atob(cleanContent);
+                            const bytes = new Uint8Array(binaryString.length);
+                            for (let i = 0; i < binaryString.length; i++) {
+                                bytes[i] = binaryString.charCodeAt(i);
+                            }
+                            content = new TextDecoder('utf-8').decode(bytes);
+                        } catch (e) {
+                            debugLog('UTF-8 decoding failed, falling back to simple atob:', e);
+                            content = atob(cleanContent);
+                        }
                     }
                     
                     // Parse CSV with explicit delimiter
