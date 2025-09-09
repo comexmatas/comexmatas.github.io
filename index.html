@@ -745,47 +745,158 @@
         }
         
         async function attemptSync() {
-            // Check if File System Access API is supported
-            if (!('showOpenFilePicker' in window)) {
-                throw new Error('File System Access API not supported in this browser. Please use Chrome, Edge, or another Chromium-based browser.');
+            if (!authToken) {
+                throw new Error('Authentication required. Please login again.');
             }
-
-            const updatedWb = buildUpdatedWorkbook();
-            const buffer = XLSX.write(updatedWb, { type: 'array', bookType: 'xlsx' });
 
             try {
-                // If we don't have a file handle yet, ask user to select the data/products.xlsx file
-                if (!fileHandleRef) {
-                    const [handle] = await window.showOpenFilePicker({
-                        types: [{ 
-                            description: 'Excel Workbook', 
-                            accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } 
-                        }],
-                        excludeAcceptAllOption: false,
-                        multiple: false,
-                        suggestedName: 'products.xlsx'
-                    });
-                    fileHandleRef = handle;
-                }
+                statusText.textContent = 'Syncing with GitHub...';
+                syncButton.disabled = true;
+                syncButton.textContent = 'Syncing...';
 
-                // Request write permission
-                const perm = await fileHandleRef.requestPermission({ mode: 'readwrite' });
-                if (perm !== 'granted') {
-                    throw new Error('Permission not granted to write the file. Please grant write permission and try again.');
-                }
-
-                // Write the updated workbook to the file
-                const writable = await fileHandleRef.createWritable();
-                await writable.write(buffer);
-                await writable.close();
+                // Step 1: Get the current file from GitHub
+                const fileInfo = await getFileFromGitHub();
                 
-                alert(`Sync complete! Updated ${dirtyById.size} rows with competitor prices in the local file.`);
+                // Step 2: Read and parse the current Excel file
+                const currentWorkbook = XLSX.read(fileInfo.content, { type: 'array' });
+                const currentSheet = currentWorkbook.Sheets[currentWorkbook.SheetNames[0]];
+                const currentRows = XLSX.utils.sheet_to_json(currentSheet, { header: 1, blankrows: false });
+                
+                // Step 3: Update the rows with our changes
+                const updatedRows = updateRowsWithChanges(currentRows);
+                
+                // Step 4: Create new workbook with updated data
+                const newWorkbook = XLSX.utils.book_new();
+                const newSheet = XLSX.utils.aoa_to_sheet(updatedRows);
+                XLSX.utils.book_append_sheet(newWorkbook, newSheet, currentWorkbook.SheetNames[0]);
+                
+                // Step 5: Convert to base64 for GitHub API
+                const buffer = XLSX.write(newWorkbook, { type: 'array', bookType: 'xlsx' });
+                const base64Content = arrayBufferToBase64(buffer);
+                
+                // Step 6: Commit the changes back to GitHub
+                await commitFileToGitHub(base64Content, fileInfo.sha);
+                
+                alert(`Sync complete! Updated ${dirtyById.size} product prices in the GitHub repository.`);
                 dirtyById.clear();
                 render();
+                
             } catch (err) {
-                console.error('Sync failed:', err);
-                throw err;
+                console.error('GitHub sync failed:', err);
+                throw new Error(`GitHub sync failed: ${err.message}`);
+            } finally {
+                syncButton.disabled = false;
+                syncButton.textContent = 'Sync';
+                statusText.textContent = `Loaded ${allRows.length} rows`;
             }
+        }
+
+        async function getFileFromGitHub() {
+            const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
+                headers: {
+                    'Authorization': `token ${authToken}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    throw new Error(`File ${DEFAULT_FILE} not found in repository`);
+                }
+                throw new Error(`Failed to fetch file: ${response.status} ${response.statusText}`);
+            }
+
+            const fileData = await response.json();
+            
+            // Decode base64 content
+            const binaryString = atob(fileData.content.replace(/\s/g, ''));
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+
+            return {
+                content: bytes,
+                sha: fileData.sha
+            };
+        }
+
+        function updateRowsWithChanges(currentRows) {
+            if (!currentRows || currentRows.length === 0) {
+                throw new Error('No data found in the current file');
+            }
+
+            const headers = currentRows[0];
+            const dataRows = currentRows.slice(1);
+            
+            // Find or add competitor_price column
+            let competitorPriceIndex = headers.findIndex(h => String(h).toLowerCase() === 'competitor_price');
+            if (competitorPriceIndex === -1) {
+                headers.push('competitor_price');
+                competitorPriceIndex = headers.length - 1;
+            }
+
+            // Find product_id column
+            const productIdIndex = headers.findIndex(h => 
+                String(h).toLowerCase().includes('product') && 
+                String(h).toLowerCase().includes('id')
+            );
+
+            if (productIdIndex === -1) {
+                throw new Error('Product ID column not found in the file');
+            }
+
+            // Update rows with our changes
+            const updatedDataRows = dataRows.map(row => {
+                // Ensure row has enough columns
+                while (row.length <= competitorPriceIndex) {
+                    row.push('');
+                }
+
+                const productId = String(row[productIdIndex] || '').trim();
+                if (productId && dirtyById.has(productId)) {
+                    row[competitorPriceIndex] = dirtyById.get(productId);
+                }
+                
+                return row;
+            });
+
+            return [headers, ...updatedDataRows];
+        }
+
+        async function commitFileToGitHub(base64Content, sha) {
+            const commitMessage = `Update competitor prices for ${dirtyById.size} products`;
+            
+            const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `token ${authToken}`,
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    message: commitMessage,
+                    content: base64Content,
+                    sha: sha
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(`Failed to commit file: ${response.status} ${response.statusText}. ${errorData.message || ''}`);
+            }
+
+            return await response.json();
+        }
+
+        function arrayBufferToBase64(buffer) {
+            let binary = '';
+            const bytes = new Uint8Array(buffer);
+            const len = bytes.byteLength;
+            for (let i = 0; i < len; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            return btoa(binary);
         }
 
         function buildUpdatedWorkbook() {
