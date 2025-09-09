@@ -56,7 +56,7 @@
             font-size: 14px;
         }
         
-        .load-button, .sync-button, .download-button {
+        .load-button, .sync-button {
             background-color: #3498db;
             color: white;
             border: none;
@@ -68,13 +68,11 @@
         }
         
         .sync-button { background-color: #27ae60; }
-        .download-button { background-color: #8e44ad; }
         
         .load-button:hover { background-color: #2980b9; }
         .sync-button:hover { background-color: #1e8449; }
-        .download-button:hover { background-color: #7d3c98; }
         
-        .load-button:disabled, .sync-button:disabled, .download-button:disabled {
+        .load-button:disabled, .sync-button:disabled {
             background-color: #bdc3c7;
             cursor: not-allowed;
         }
@@ -376,7 +374,7 @@
             overflow-y: auto;
         }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 </head>
 <body>
     <!-- Authentication Screen -->
@@ -408,7 +406,7 @@
     <div id="mainApp" class="main-app">
         <div class="header">
             <h1>Normal Prices Registry</h1>
-            <p>Display and browse data files (CSV or Excel .xlsx)
+            <p>Display and browse CSV data files with GitHub sync
                 <button id="logoutButton" class="logout-button">Logout</button>
             </p>
         </div>
@@ -444,7 +442,7 @@
 
     <script>
         // Configuration
-        const DEFAULT_FILE = 'data/products.xlsx';
+        const DEFAULT_FILE = 'data/products.csv';
         const GITHUB_OWNER = 'comexmatas';
         const GITHUB_REPO = 'comexmatas.github.io';
         const SESSION_KEY = 'github_token';
@@ -462,14 +460,15 @@
 
         // App state
         const pageSize = 100;
-        let workbookRef = null;
-        let sheetNameRef = null;
         let headersRef = [];
         let allRows = [];
         let filteredRows = [];
         let currentPage = 1;
         let dirtyById = new Map();
         let errorById = new Set();
+        let localChanges = new Set(); // Track which items have local changes
+        let lastCommitSha = null;
+        let lastSyncTime = null;
 
         // Authentication state
         let isAuthenticated = false;
@@ -641,41 +640,37 @@
         }
 
         function loadData(filePath) {
-            if (filePath.toLowerCase().endsWith('.xlsx')) {
-                loadXLSX(filePath);
+            if (filePath.toLowerCase().endsWith('.csv')) {
+                loadCSV(filePath);
             } else {
-                errorMessage.innerHTML = `<div class="error">Unsupported file type. Please select a .xlsx file.</div>`;
+                errorMessage.innerHTML = `<div class="error">Unsupported file type. Please select a .csv file.</div>`;
             }
         }
 
-        async function loadXLSX(filePath) {
+        async function loadCSV(filePath) {
             try {
                 dataContainer.innerHTML = '<div class="loading">Loading data...</div>';
                 errorMessage.innerHTML = '';
-                debugLog('Starting to load XLSX file', filePath);
+                debugLog('Starting to load CSV file', filePath);
 
                 const response = await fetch(filePath);
                 if (!response.ok) {
                     throw new Error(`Failed to load file: ${response.status} ${response.statusText}`);
                 }
 
-                const arrayBuffer = await response.arrayBuffer();
-                debugLog('File loaded, size:', arrayBuffer.byteLength);
+                const csvText = await response.text();
+                debugLog('File loaded, size:', csvText.length);
                 
-                const workbook = XLSX.read(new Uint8Array(arrayBuffer), { 
-                    type: 'array',
-                    cellFormula: false,
-                    cellHTML: false
+                // Parse CSV using Papa Parse
+                const parsed = Papa.parse(csvText, {
+                    header: false,
+                    dynamicTyping: false,
+                    skipEmptyLines: true
                 });
-                debugLog('Workbook parsed, sheets:', workbook.SheetNames);
-
-                const firstSheetName = workbook.SheetNames[0];
-                const firstSheet = workbook.Sheets[firstSheetName];
-
-                const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, blankrows: false });
-                debugLog('Rows extracted:', rows.length);
                 
-                if (!rows || rows.length === 0) {
+                debugLog('CSV parsed, rows:', parsed.data.length);
+
+                if (!parsed.data || parsed.data.length === 0) {
                     headersRef = [];
                     allRows = [];
                     filteredRows = [];
@@ -683,8 +678,8 @@
                     return;
                 }
 
-                const headers = rows[0].map(h => String(h ?? '').trim()).filter(h => h);
-                const dataRows = rows.slice(1).map(r => headers.map((_, idx) => String((r[idx] ?? '')).trim()));
+                const headers = parsed.data[0].map(h => String(h ?? '').trim()).filter(h => h);
+                const dataRows = parsed.data.slice(1).map(r => headers.map((_, idx) => String((r[idx] ?? '')).trim()));
 
                 debugLog('Headers:', headers);
                 debugLog('Data rows count:', dataRows.length);
@@ -692,10 +687,9 @@
                 headersRef = headers;
                 allRows = dataRows.map((row, idx) => rowToObject(headersRef, row, idx));
                 filteredRows = allRows;
-                workbookRef = workbook;
-                sheetNameRef = firstSheetName;
                 dirtyById.clear();
                 errorById.clear();
+                localChanges.clear();
                 currentPage = 1;
                 syncButton.disabled = false;
                 statusText.textContent = `Loaded ${allRows.length} rows`;
@@ -705,8 +699,8 @@
                 
                 render();
             } catch (error) {
-                console.error('Error loading XLSX:', error);
-                debugLog('Error loading XLSX:', error.message);
+                console.error('Error loading CSV:', error);
+                debugLog('Error loading CSV:', error.message);
                 errorMessage.innerHTML = `<div class="error">Error loading file: ${error.message}</div>`;
                 dataContainer.innerHTML = '<div class="empty-state">Failed to load data.</div>';
             }
@@ -820,18 +814,27 @@
             const dirtyCount = dirtyById.size;
             dirtyText.textContent = dirtyCount ? ` • ${dirtyCount} edited` : '';
             
-            document.querySelectorAll('input.price-input').forEach(input => {
+            // Attach event listeners only to new inputs (those without listeners)
+            document.querySelectorAll('input.price-input:not([data-listeners-attached])').forEach(input => {
                 input.addEventListener('input', onPriceInputChange);
                 input.addEventListener('blur', onPriceInputBlur);
                 input.addEventListener('keypress', (e) => {
                     if (e.key === 'Enter') { e.currentTarget.blur(); }
                 });
+                input.setAttribute('data-listeners-attached', 'true');
             });
             
+            // Attach pagination event listeners only once
             const prevBtn = document.getElementById('prevPage');
             const nextBtn = document.getElementById('nextPage');
-            if (prevBtn) prevBtn.addEventListener('click', () => { currentPage = Math.max(1, currentPage - 1); render(); });
-            if (nextBtn) nextBtn.addEventListener('click', () => { currentPage += 1; render(); });
+            if (prevBtn && !prevBtn.hasAttribute('data-listener-attached')) {
+                prevBtn.addEventListener('click', () => { currentPage = Math.max(1, currentPage - 1); render(); });
+                prevBtn.setAttribute('data-listener-attached', 'true');
+            }
+            if (nextBtn && !nextBtn.hasAttribute('data-listener-attached')) {
+                nextBtn.addEventListener('click', () => { currentPage += 1; render(); });
+                nextBtn.setAttribute('data-listener-attached', 'true');
+            }
         }
 
         function onPriceInputChange(e) {
@@ -847,8 +850,10 @@
                 errorById.delete(rowId);
                 if (val === '') {
                     dirtyById.delete(rowId);
+                    localChanges.delete(rowId);
                 } else {
                     dirtyById.set(rowId, val);
+                    localChanges.add(rowId); // Track this as a local change
                 }
             }
             
@@ -883,97 +888,45 @@
                 syncButton.disabled = true;
                 syncButton.textContent = 'Syncing...';
 
-                // Get current file from GitHub
-                let fileInfo, currentRows;
+                // Step 1: Load current file from GitHub
+                let fileInfo, remoteData = [];
                 
                 try {
                     fileInfo = await getFileFromGitHub();
-                debugLog('File retrieved from GitHub', { size: fileInfo.content.length, sha: fileInfo.sha.substring(0, 8) });
-                
-                // Parse the current file
-                const currentWorkbook = XLSX.read(fileInfo.content, { 
-                    type: 'array',
-                    cellFormula: false,
-                    cellHTML: false
-                });
+                    debugLog('File retrieved from GitHub', { size: fileInfo.content.length, sha: fileInfo.sha.substring(0, 8) });
                     
-                    debugLog('Workbook parsed', { sheetNames: currentWorkbook.SheetNames });
-                
-                const currentSheet = currentWorkbook.Sheets[currentWorkbook.SheetNames[0]];
-                    currentRows = XLSX.utils.sheet_to_json(currentSheet, { header: 1, blankrows: false });
-                    debugLog('Current file parsed', { 
-                        rows: currentRows.length,
-                        firstRow: currentRows[0],
-                        secondRow: currentRows[1],
-                        hasHeaders: currentRows.length > 0 && Array.isArray(currentRows[0]) && currentRows[0].length > 0
+                    // Parse the current CSV file
+                    const csvText = new TextDecoder().decode(fileInfo.content);
+                    const parsed = Papa.parse(csvText, {
+                        header: false,
+                        dynamicTyping: false,
+                        skipEmptyLines: true
                     });
+                    
+                    remoteData = parsed.data;
+                    debugLog('Remote CSV parsed', { rows: remoteData.length });
                 } catch (error) {
                     if (error.message.includes('404')) {
                         // File doesn't exist, use local data structure
                         debugLog('File not found on GitHub, using local structure');
-                        currentRows = [headersRef, ...allRows.map(row => headersRef.map(h => row[h] || ''))];
+                        remoteData = [headersRef, ...allRows.map(row => headersRef.map(h => row[h] || ''))];
                         fileInfo = null; // Will create new file
                     } else {
                         throw error;
                     }
                 }
                 
-                // Update rows with changes
-                const updatedRows = updateRowsWithChanges(currentRows, dirtyById);
-                debugLog('Rows updated with changes', { originalRows: currentRows.length, updatedRows: updatedRows.length });
+                // Step 2: Merge local changes with remote data
+                const mergedData = mergeCSVData(remoteData, dirtyById);
+                debugLog('Data merged', { originalRows: remoteData.length, mergedRows: mergedData.length });
                 
-                // Safety check: ensure we have valid data structure
-                if (!Array.isArray(updatedRows)) {
-                    debugLog('updatedRows is not an array', { type: typeof updatedRows, value: updatedRows });
-                    throw new Error('Data integrity check failed: updatedRows is not an array');
-                }
+                // Step 3: Convert merged data back to CSV
+                const csvContent = Papa.unparse(mergedData, {
+                    header: false
+                });
                 
-                if (updatedRows.length === 0) {
-                    debugLog('No rows returned from updateRowsWithChanges', { 
-                        originalRowsLength: currentRows ? currentRows.length : 'N/A',
-                        originalRowsType: typeof currentRows,
-                        dirtyCount: dirtyById.size
-                    });
-                    throw new Error('Data integrity check failed: No rows returned from updateRowsWithChanges');
-                }
-                
-                // Safety check: ensure we haven't lost data
-                if (updatedRows.length < currentRows.length) {
-                    debugLog('Row count mismatch', { original: currentRows.length, updated: updatedRows.length });
-                    throw new Error(`Data integrity check failed: Original had ${currentRows.length} rows, updated has ${updatedRows.length} rows`);
-                }
-                
-                // Safety check: ensure headers are still present
-                if (!updatedRows[0] || !Array.isArray(updatedRows[0]) || updatedRows[0].length === 0) {
-                    debugLog('Headers check failed', { 
-                        firstRowExists: !!updatedRows[0], 
-                        isArray: Array.isArray(updatedRows[0]), 
-                        length: updatedRows[0] ? updatedRows[0].length : 'N/A',
-                        firstRow: updatedRows[0]
-                    });
-                    throw new Error('Data integrity check failed: Headers are missing or invalid');
-                }
-                
-                // Safety check: ensure we have data rows
-                if (updatedRows.length < 2 && currentRows.length >= 2) {
-                    debugLog('Data rows check failed', { 
-                        originalDataRows: currentRows.length - 1, 
-                        updatedDataRows: updatedRows.length - 1 
-                    });
-                    throw new Error('Data integrity check failed: Data rows are missing');
-                }
-                
-                // Create new workbook with updated data
-                const newWorkbook = XLSX.utils.book_new();
-                const newSheet = XLSX.utils.aoa_to_sheet(updatedRows);
-                XLSX.utils.book_append_sheet(newWorkbook, newSheet, sheetNameRef || 'Sheet1');
-                
-                // Convert workbook to binary
-                const wbBinary = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
-                debugLog('Workbook generated', { size: wbBinary.length });
-                
-                // Update GitHub file
-                const base64Content = btoa(String.fromCharCode.apply(null, new Uint8Array(wbBinary)));
+                // Step 4: Update GitHub file
+                const base64Content = btoa(unescape(encodeURIComponent(csvContent)));
                 
                 const commitMessage = `Update prices: ${dirtyById.size} changes at ${new Date().toLocaleString()}`;
                 
@@ -1005,14 +958,21 @@
                 
                 debugLog('GitHub file updated successfully');
                 
-                // Update our local references
+                // Step 5: Update local state
                 const responseData = await updateResponse.json();
                 const changeCount = dirtyById.size;
-                workbookRef = newWorkbook;
+                lastCommitSha = responseData.content.sha;
+                lastSyncTime = new Date().toISOString();
+                
+                // Clear local changes
                 dirtyById.clear();
+                localChanges.clear();
                 
                 statusText.textContent = `Synced ${changeCount} changes to GitHub`;
                 alert(`Sync completed successfully! ${changeCount} price updates saved to GitHub.`);
+                
+                // Refresh display
+                render();
                 
             } catch (error) {
                 console.error('Sync failed:', error);
@@ -1045,57 +1005,53 @@
             };
         }
         
-        function updateRowsWithChanges(rows, changes) {
-            debugLog('updateRowsWithChanges called with', { 
-                rowsType: typeof rows, 
-                rowsIsArray: Array.isArray(rows),
-                rowsLength: rows ? rows.length : 'N/A',
+        function mergeCSVData(remoteData, changes) {
+            debugLog('mergeCSVData called with', { 
+                remoteRowsCount: remoteData ? remoteData.length : 'N/A',
                 changesSize: changes ? changes.size : 'N/A'
             });
             
-            if (!rows || rows.length === 0) {
-                debugLog('updateRowsWithChanges: No input rows, returning empty structure');
-                // Return at least headers if we have them from local data
+            if (!remoteData || remoteData.length === 0) {
+                debugLog('No remote data, using local structure');
+                // Return local data structure with changes applied
                 if (headersRef && headersRef.length > 0) {
-                    return [headersRef];
-                }
-                return [[]]; // Return at least one empty row to avoid empty array
-            }
-            
-            if (!Array.isArray(rows)) {
-                debugLog('updateRowsWithChanges: Input is not an array', { type: typeof rows, value: rows });
-                // Try to convert to array or return minimal structure
-                if (headersRef && headersRef.length > 0) {
-                    return [headersRef];
+                    const headers = [...headersRef];
+                    
+                    // Find or add competitor_price column
+                    let priceColumnIndex = headers.findIndex(h => 
+                        String(h || '').toLowerCase().includes('competitor_price')
+                    );
+                    
+                    if (priceColumnIndex === -1) {
+                        headers.push('competitor_price');
+                        priceColumnIndex = headers.length - 1;
+                    }
+                    
+                    const dataRows = allRows.map(row => {
+                        const dataRow = headers.map(h => row[h] || '');
+                        const rowId = row.__id;
+                        
+                        // Apply changes if any
+                        if (changes.has(rowId)) {
+                            dataRow[priceColumnIndex] = changes.get(rowId);
+                        }
+                        
+                        return dataRow;
+                    });
+                    
+                    return [headers, ...dataRows];
                 }
                 return [[]];
             }
             
-            if (rows.length < 1) {
-                debugLog('updateRowsWithChanges: Input has no rows');
-                return headersRef && headersRef.length > 0 ? [headersRef] : [[]];
-            }
+            const headers = remoteData[0] || [];
+            const dataRows = remoteData.slice(1);
             
-            const headers = rows[0];
-            const dataRows = rows.slice(1);
-            
-            if (!Array.isArray(headers)) {
-                debugLog('updateRowsWithChanges: Headers row is not an array', { headers, type: typeof headers });
-                // Try to use local headers as fallback
-                if (headersRef && headersRef.length > 0) {
-                    debugLog('Using headersRef as fallback');
-                    return [headersRef, ...dataRows];
-                }
-                // Last resort: return original rows
-                return rows;
-            }
-            
-            debugLog('updateRowsWithChanges input', { 
+            debugLog('mergeCSVData input', { 
                 headersCount: headers.length, 
                 dataRowsCount: dataRows.length,
                 changesCount: changes.size,
-                sampleHeader: headers.slice(0, 5),
-                sampleDataRow: dataRows.length > 0 ? dataRows[0].slice(0, 5) : []
+                sampleHeader: headers.slice(0, 5)
             });
             
             // Find or add competitor_price column
@@ -1111,9 +1067,8 @@
                 debugLog('Found existing competitor_price column at index', priceColumnIndex);
             }
             
-            // Update data rows
+            // Update data rows with changes
             const updatedDataRows = dataRows.map((row, idx) => {
-                // Use the current file's headers to create row object, not headersRef
                 const rowObj = rowToObject(headers, row, idx);
                 const rowId = rowObj.__id;
                 
@@ -1134,19 +1089,11 @@
             
             const result = [headers, ...updatedDataRows];
             
-            debugLog('updateRowsWithChanges output', { 
+            debugLog('mergeCSVData output', { 
                 headersCount: headers.length, 
                 updatedRowsCount: updatedDataRows.length,
-                sampleUpdatedRow: updatedDataRows.length > 0 ? updatedDataRows[0].slice(0, 5) : [],
-                resultLength: result.length,
-                resultIsArray: Array.isArray(result)
+                resultLength: result.length
             });
-            
-            // Final safeguard
-            if (!Array.isArray(result) || result.length === 0) {
-                debugLog('Final safeguard triggered, returning minimal structure');
-                return headersRef && headersRef.length > 0 ? [headersRef] : [['Product ID', 'Brand', 'Product', 'Category', 'competitor_price']];
-            }
             
             return result;
         }
@@ -1240,6 +1187,7 @@
                     if (draftAge < 24 * 60 * 60 * 1000) {
                         Object.entries(draftData.changes).forEach(([key, value]) => {
                             dirtyById.set(key, value);
+                            localChanges.add(key); // Also restore to localChanges tracking
                         });
                         
                         if (dirtyById.size > 0) {
@@ -1256,10 +1204,10 @@
             }
         }
 
-        // Save draft whenever changes are made
-        const originalUpdatePrice = updateDirtyStatus;
-        updateDirtyStatus = function() {
-            originalUpdatePrice.apply(this, arguments);
+        // Save draft whenever changes are made - integrate into onPriceInputChange
+        const originalOnPriceInputChange = onPriceInputChange;
+        onPriceInputChange = function(e) {
+            originalOnPriceInputChange.call(this, e);
             saveDraft();
         };
     </script>
