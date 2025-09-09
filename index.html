@@ -1054,6 +1054,12 @@
             checkExistingSession();
             setupAuthHandlers();
             setupAppHandlers();
+            
+            // Load last sync time
+            const savedSyncTime = localStorage.getItem('lastSyncTime');
+            if (savedSyncTime) {
+                lastSyncTime = savedSyncTime;
+            }
         });
 
         function checkExistingSession() {
@@ -1513,7 +1519,7 @@
                 syncButton.textContent = 'Syncing...';
 
                 // Step 1: Load current file from GitHub
-                let fileInfo, remoteData = [];
+                let fileInfo, remoteDatabase = [];
                 let hasRemoteData = false;
                 
                 try {
@@ -1523,19 +1529,21 @@
                     // Parse the current CSV file
                     const csvText = new TextDecoder().decode(fileInfo.content);
                     const parsed = Papa.parse(csvText, {
-                        header: false,
+                        header: true,
                         dynamicTyping: false,
                         skipEmptyLines: true
                     });
                     
-                    remoteData = parsed.data;
+                    // Convert to our internal format
+                    remoteDatabase = parsed.data.map((row, idx) => rowToObject(Object.keys(row), Object.values(row), idx))
+                                                  .filter(item => item.__id);
                     hasRemoteData = true;
-                    debugLog('Remote CSV parsed', { rows: remoteData.length });
+                    debugLog('Remote CSV parsed', { rows: remoteDatabase.length });
                 } catch (error) {
                     if (error.message.includes('404')) {
                         // File doesn't exist, use local data structure
                         debugLog('File not found on GitHub, using local structure');
-                        remoteData = [];
+                        remoteDatabase = [];
                         hasRemoteData = false;
                         fileInfo = null; // Will create new file
                     } else {
@@ -1543,16 +1551,16 @@
                     }
                 }
                 
-                // Step 2: Merge local changes with remote data
-                const mergedData = smartMergeCSVData(remoteData, localChanges, hasRemoteData);
-                debugLog('Data merged', { originalRows: remoteData.length, mergedRows: mergedData.length });
+                // Step 2: Merge databases
+                const mergedDatabase = mergeDatabase(allRows, remoteDatabase);
+                debugLog('Database merged', { localRows: allRows.length, remoteRows: remoteDatabase.length, mergedRows: mergedDatabase.length });
                 
                 // Step 3: Check for overwrites and warn user
-                const overwrites = detectPriceOverwrites(remoteData, localChanges);
+                const overwrites = detectOverwrites(allRows, remoteDatabase);
                 
                 if (overwrites.length > 0 && localChanges.size > 0) {
-                    const message = `This sync will overwrite ${overwrites.length} remote price(s) with your local changes:\n\n` +
-                                  overwrites.slice(0, 5).map(item => `• ${item.id}: ${item.oldPrice} → ${item.newPrice}`).join('\n') +
+                    const message = `This sync will overwrite ${overwrites.length} remote record(s) with your local changes:\n\n` +
+                                  overwrites.slice(0, 5).map(id => `• ${id}`).join('\n') +
                                   (overwrites.length > 5 ? `\n... and ${overwrites.length - 5} more` : '') +
                                   '\n\nContinue?';
                     
@@ -1562,13 +1570,12 @@
                     }
                 }
                 
-                // Step 4: Convert merged data back to CSV
-                const csvContent = Papa.unparse(mergedData, {
-                    header: false
-                });
+                // Step 4: Update local database
+                allRows = mergedDatabase;
+                filteredRows = allRows;
                 
                 // Step 5: Push to GitHub
-                await pushCSVToGitHub(csvContent, fileInfo);
+                await pushToGitHub();
                 
                 // Step 6: Clear local changes tracking
                 const changeCount = localChanges.size;
@@ -1576,13 +1583,14 @@
                 
                 // Step 7: Update local state
                 lastSyncTime = new Date().toISOString();
+                localStorage.setItem('lastSyncTime', lastSyncTime);
                 
-                // Step 8: Update UI and re-fetch data
+                // Step 8: Update UI
+                currentPage = 1;
                 statusText.textContent = `Synced ${changeCount} changes to GitHub`;
-                alert(`Sync completed successfully! ${changeCount} price updates saved to GitHub.`);
+                render();
                 
-                // Trigger Load Data button to re-fetch latest data
-                loadButton.click();
+                alert(`Sync completed successfully! ${changeCount} price updates saved to GitHub.`);
                 
             } catch (error) {
                 console.error('Sync failed:', error);
@@ -1592,6 +1600,62 @@
                 syncButton.disabled = false;
                 syncButton.textContent = 'Sync';
             }
+        }
+
+        function mergeDatabase(local, remote) {
+            const merged = new Map();
+            const syncTimestamp = new Date().toISOString();
+            
+            // First, add all remote records
+            remote.forEach(item => {
+                merged.set(item.__id, {...item});
+            });
+            
+            // Then, overwrite with local records where there are changes
+            local.forEach(item => {
+                const itemId = item.__id;
+                if (localChanges.has(itemId)) {
+                    // This is a local change, update with local data and sync timestamp
+                    const updatedItem = {...item};
+                    
+                    // Apply local price changes
+                    if (dirtyById.has(itemId)) {
+                        updatedItem.competitor_price = dirtyById.get(itemId);
+                    }
+                    
+                    // Add sync timestamp (but filter it out from display)
+                    updatedItem.lastSyncedAt = syncTimestamp;
+                    
+                    merged.set(itemId, updatedItem);
+                } else if (!merged.has(itemId)) {
+                    // New item that wasn't in remote, add it
+                    merged.set(itemId, {...item});
+                }
+                // If item exists in remote and no local changes, keep remote version
+            });
+            
+            return Array.from(merged.values());
+        }
+
+        function detectOverwrites(local, remote) {
+            const overwrites = [];
+            
+            local.forEach(localItem => {
+                const itemId = localItem.__id;
+                if (localChanges.has(itemId)) {
+                    const remoteItem = remote.find(r => r.__id === itemId);
+                    if (remoteItem && remoteItem.lastSyncedAt && lastSyncTime) {
+                        // Check if remote has been modified since our last sync
+                        const remoteSync = new Date(remoteItem.lastSyncedAt);
+                        const ourLastSync = new Date(lastSyncTime);
+                        if (remoteSync > ourLastSync) {
+                            overwrites.push(itemId);
+                        }
+                    }
+                }
+            });
+            
+            return overwrites;
         }
         
         async function getFileFromGitHub() {
@@ -1615,186 +1679,73 @@
             };
         }
         
-        function smartMergeCSVData(remoteData, localChanges, hasRemoteData) {
-            debugLog('smartMergeCSVData called with', { 
-                remoteRowsCount: remoteData ? remoteData.length : 'N/A',
-                localChangesSize: localChanges ? localChanges.size : 'N/A',
-                hasRemoteData
-            });
-            
-            if (!hasRemoteData || !remoteData || remoteData.length === 0) {
-                debugLog('No remote data, using local structure');
-                // Return local data structure with changes applied
-                if (headersRef && headersRef.length > 0) {
-                    const headers = [...headersRef];
-                    
-                    // Find or add competitor_price column
-                    let priceColumnIndex = headers.findIndex(h => 
-                        String(h || '').toLowerCase().includes('competitor_price')
-                    );
-                    
-                    if (priceColumnIndex === -1) {
-                        headers.push('competitor_price');
-                        priceColumnIndex = headers.length - 1;
-                    }
-                    
-                    const dataRows = allRows.map(row => {
-                        const dataRow = headers.map(h => row[h] || '');
-                        const rowId = row.__id;
-                        
-                        // Apply user session changes
-                        if (localChanges.has(rowId) && dirtyById.has(rowId)) {
-                            dataRow[priceColumnIndex] = dirtyById.get(rowId);
-                        } else if (row['competitor_price']) {
-                            // Keep existing price from CSV
-                            dataRow[priceColumnIndex] = row['competitor_price'];
-                        }
-                        
-                        return dataRow;
-                    });
-                    
-                    return [headers, ...dataRows];
-                }
-                return [[]];
-            }
-            
-            const headers = remoteData[0] || [];
-            const dataRows = remoteData.slice(1);
-            
-            debugLog('smartMergeCSVData input', { 
-                headersCount: headers.length, 
-                dataRowsCount: dataRows.length,
-                localChangesCount: localChanges.size,
-                sampleHeader: headers.slice(0, 5)
-            });
-            
-            // Find or add competitor_price column
-            let priceColumnIndex = headers.findIndex(h => 
-                String(h || '').toLowerCase().includes('competitor_price')
-            );
-            
-            if (priceColumnIndex === -1) {
-                headers.push('competitor_price');
-                priceColumnIndex = headers.length - 1;
-                debugLog('Added competitor_price column at index', priceColumnIndex);
-            } else {
-                debugLog('Found existing competitor_price column at index', priceColumnIndex);
-            }
-            
-            // Update data rows with smart merging
-            const updatedDataRows = dataRows.map((row, idx) => {
-                const rowObj = rowToObject(headers, row, idx);
-                const rowId = rowObj.__id;
-                
-                // Extend row to match headers length
-                const extendedRow = [...row];
-                while (extendedRow.length < headers.length) {
-                    extendedRow.push('');
-                }
-                
-                // Apply local changes only if this row was modified in user session
-                if (localChanges.has(rowId) && dirtyById.has(rowId)) {
-                    debugLog('Applying local change to row', { 
-                        rowId, 
-                        oldValue: extendedRow[priceColumnIndex], 
-                        newValue: dirtyById.get(rowId) 
-                    });
-                    extendedRow[priceColumnIndex] = dirtyById.get(rowId);
-                }
-                // Note: Existing prices from remote CSV are preserved as-is
-                
-                return extendedRow;
-            });
-            
-            const result = [headers, ...updatedDataRows];
-            
-            debugLog('smartMergeCSVData output', { 
-                headersCount: headers.length, 
-                updatedRowsCount: updatedDataRows.length,
-                resultLength: result.length
-            });
-            
-            return result;
-        }
 
-        function detectPriceOverwrites(remoteData, localChanges) {
-            const overwrites = [];
-            
-            if (!remoteData || remoteData.length === 0 || localChanges.size === 0) {
-                return overwrites;
+        async function pushToGitHub() {
+            // Convert merged database back to CSV format
+            if (allRows.length === 0) {
+                debugLog('No data to push');
+                return;
             }
             
-            const headers = remoteData[0] || [];
-            const dataRows = remoteData.slice(1);
+            // Create CSV headers and data
+            const headers = headersRef && headersRef.length > 0 ? [...headersRef] : Object.keys(allRows[0]).filter(key => !key.startsWith('__'));
             
-            // Find competitor_price column
-            const priceColumnIndex = headers.findIndex(h => 
-                String(h || '').toLowerCase().includes('competitor_price')
-            );
-            
-            if (priceColumnIndex === -1) {
-                return overwrites; // No price column, no overwrites possible
+            // Ensure we have lastSyncedAt column for tracking
+            if (!headers.includes('lastSyncedAt')) {
+                headers.push('lastSyncedAt');
             }
             
-            dataRows.forEach((row, idx) => {
-                const rowObj = rowToObject(headers, row, idx);
-                const rowId = rowObj.__id;
-                
-                // Only check for conflicts on rows that user actually changed in this session
-                if (localChanges.has(rowId) && dirtyById.has(rowId)) {
-                    const remotePrice = row[priceColumnIndex] || '';
-                    const localPrice = dirtyById.get(rowId) || '';
-                    
-                    // Warn if remote has a different price than local change
-                    if (remotePrice && remotePrice !== localPrice) {
-                        overwrites.push({
-                            id: rowId,
-                            oldPrice: remotePrice,
-                            newPrice: localPrice
-                        });
+            // Convert rows to CSV format
+            const csvData = allRows.map(row => {
+                return headers.map(header => {
+                    if (header === 'lastSyncedAt' && row[header]) {
+                        return row[header];
                     }
-                }
+                    return row[header] || '';
+                });
             });
             
-            debugLog('Detected overwrites', overwrites);
-            return overwrites;
-        }
-
-        async function pushCSVToGitHub(csvContent, fileInfo) {
-            const base64Content = btoa(unescape(encodeURIComponent(csvContent)));
-            const commitMessage = `Smart sync: ${localChanges.size} price changes at ${new Date().toLocaleString()}`;
+            // Add headers as first row
+            const csvWithHeaders = [headers, ...csvData];
             
-            const updatePayload = {
-                message: commitMessage,
-                content: base64Content,
+            // Convert to CSV string
+            const csv = Papa.unparse(csvWithHeaders, {
+                header: false
+            });
+            
+            const content = btoa(unescape(encodeURIComponent(csv))); // Better encoding for special characters
+            const message = `Smart sync: ${localChanges.size} price changes at ${new Date().toLocaleString()}`;
+            
+            const body = {
+                message: message,
+                content: content,
                 branch: 'main'
             };
             
-            // Only include SHA if file exists
-            if (fileInfo && fileInfo.sha) {
-                updatePayload.sha = fileInfo.sha;
+            if (lastCommitSha) {
+                body.sha = lastCommitSha;
             }
             
-            const updateResponse = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
+            const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
                 method: 'PUT',
                 headers: {
                     'Authorization': `token ${authToken}`,
                     'Accept': 'application/vnd.github.v3+json',
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(updatePayload)
+                body: JSON.stringify(body)
             });
             
-            if (!updateResponse.ok) {
-                const errorData = await updateResponse.json();
-                throw new Error(`GitHub update failed: ${errorData.message || updateResponse.statusText}`);
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.message || 'Failed to push to GitHub');
             }
             
-            const responseData = await updateResponse.json();
-            lastCommitSha = responseData.content.sha;
+            const data = await response.json();
+            lastCommitSha = data.content.sha;
             debugLog('GitHub file updated successfully with smart sync');
             
-            return responseData;
+            return data;
         }
 
         function displayEmpty() {
