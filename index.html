@@ -807,7 +807,7 @@
         async function getFileFromGitHub() {
             console.log(`Fetching file from GitHub: ${DEFAULT_FILE}`);
             
-            const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
+            const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
                 headers: {
                     'Authorization': `token ${authToken}`,
                     'Accept': 'application/vnd.github.v3+json'
@@ -931,7 +931,7 @@
         async function commitFileToGitHub(base64Content, sha) {
             const commitMessage = `Update competitor prices for ${dirtyById.size} products`;
             
-            const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
+            const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
                 method: 'PUT',
                 headers: {
                     'Authorization': `token ${authToken}`,
