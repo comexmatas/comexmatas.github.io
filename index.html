@@ -572,6 +572,46 @@
                 font-size: 14px;
             }
 
+            /* Mobile-specific column widths */
+            .mobile-device table th:first-child,
+            .mobile-device table td:first-child {
+                width: 60px; /* Image column */
+                min-width: 60px;
+            }
+
+            .mobile-device table th:nth-child(2),
+            .mobile-device table td:nth-child(2) {
+                min-width: 120px; /* Product column */
+                max-width: 200px;
+                word-wrap: break-word;
+                white-space: normal;
+                line-height: 1.3;
+            }
+
+            .mobile-device table th:nth-child(3),
+            .mobile-device table td:nth-child(3) {
+                width: 100px; /* Price column */
+                min-width: 100px;
+            }
+
+            .mobile-device table th:nth-child(4),
+            .mobile-device table td:nth-child(4) {
+                min-width: 80px; /* Brand column */
+                max-width: 120px;
+                word-wrap: break-word;
+                white-space: normal;
+                line-height: 1.3;
+            }
+
+            .mobile-device table th:nth-child(5),
+            .mobile-device table td:nth-child(5) {
+                min-width: 100px; /* Category column */
+                max-width: 150px;
+                word-wrap: break-word;
+                white-space: normal;
+                line-height: 1.3;
+            }
+
             th {
                 padding: 12px 8px;
                 font-size: 12px;
@@ -983,7 +1023,7 @@
     
     <div class="controls">
         <div class="controls-row">
-            <input id="searchInput" class="search-input" type="search" placeholder="Search Product ID, Brand, Product Name, Category" inputmode="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+            <input id="searchInput" class="search-input" type="search" placeholder="Search Product, Brand, Category" inputmode="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
             <button id="loadButton" class="load-button">Load Data</button>
             <button id="syncButton" class="sync-button" disabled>Sync</button>
         </div>
@@ -1399,7 +1439,7 @@
                 return;
             }
             const q = query.toLowerCase();
-            const fields = ['Product ID', 'Brand', 'Product', 'Category', 'product_id', 'brand', 'product', 'category'];
+            const fields = ['Product ID', 'Brand', 'Product', 'Category', 'product_id', 'brand', 'product', 'category', 'Product Name', 'product_name', 'productname'];
             filteredRows = allRows.filter(r => fields.some(f => String(r[f] ?? '').toLowerCase().includes(q)));
         }
 
@@ -1419,11 +1459,37 @@
         }
 
         function buildTable(headers, rows) {
-            // Filter out product URL columns from display, but keep Image URL columns
-            // Also filter out lastSyncedAt columns and similar sync-related columns
+            // Define mobile-friendly column order: Image URL, Product, Competitor Price, Brand, Category
+            const preferredOrder = [
+                'Image URL', 'image_url', 'imageurl', 'image',
+                'Product', 'product', 'Product Name', 'product_name', 'productname',
+                'competitor_price', 'Competitor Price', 'competitorprice', 'price',
+                'Brand', 'brand',
+                'Category', 'category'
+            ];
+            
+            // Find matching headers for each preferred column
+            const orderedHeaders = [];
+            const usedHeaders = new Set();
+            
+            // First, add headers in preferred order
+            preferredOrder.forEach(preferred => {
+                const matchingHeader = headers.find(h => {
+                    const headerLc = String(h || '').toLowerCase();
+                    const preferredLc = preferred.toLowerCase();
+                    return headerLc === preferredLc && !usedHeaders.has(h);
+                });
+                if (matchingHeader) {
+                    orderedHeaders.push(matchingHeader);
+                    usedHeaders.add(matchingHeader);
+                }
+            });
+            
+            // Then add any remaining important headers that weren't filtered out
             const visibleHeaders = headers.filter(h => {
                 const headerLc = String(h || '').toLowerCase();
-                return !(headerLc.includes('url') && !headerLc.includes('image')) && 
+                return !usedHeaders.has(h) &&
+                       !(headerLc.includes('url') && !headerLc.includes('image')) && 
                        !headerLc.includes('lastsyncedat') && 
                        !headerLc.includes('last_synced_at') &&
                        !headerLc.includes('lastsync') &&
@@ -1432,13 +1498,19 @@
                        !headerLc.includes('sync_time') &&
                        !headerLc.includes('synctime') &&
                        !headerLc.includes('last_updated_at') &&
-                       !headerLc.includes('lastupdatedat');
+                       !headerLc.includes('lastupdatedat') &&
+                       !headerLc.includes('product_id') && // Hide product ID on mobile for space
+                       !headerLc.includes('productid') &&
+                       !headerLc.includes('id');
             });
+            
+            // Combine ordered headers with remaining visible headers
+            const finalHeaders = [...orderedHeaders, ...visibleHeaders];
             
             const thead = `
                 <thead>
                     <tr>
-                        ${visibleHeaders.map(h => `<th>${escapeHtml(h)}</th>`).join('')}
+                        ${finalHeaders.map(h => `<th>${escapeHtml(h)}</th>`).join('')}
                     </tr>
                 </thead>`;
             const tbodyRows = rows.map(r => {
@@ -1449,7 +1521,7 @@
                 const priceVal = localChanges.has(rowId) ? dirtyById.get(rowId) : (r['competitor_price'] || '');
                 const rowClass = isDirty ? ' class="row-dirty"' : '';
                 
-                const cells = visibleHeaders.map(h => {
+                const cells = finalHeaders.map(h => {
                     const headerLc = String(h || '').toLowerCase();
                     if (headerLc.includes('competitor_price')) {
                         // Render competitor_price as editable input
