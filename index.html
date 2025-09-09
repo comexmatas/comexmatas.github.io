@@ -1358,6 +1358,8 @@
                     throw new Error('Authentication required. Please login first.');
                 }
 
+                let parsed = null;
+
                 // Load from GitHub API
                 const response = await fetch(
                     `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${filePath}`,
@@ -1377,21 +1379,31 @@
                     const content = atob(data.content);
                     
                     // Parse CSV
-                    const parsed = Papa.parse(content, {
+                    parsed = Papa.parse(content, {
                         header: true,
                         dynamicTyping: false,
                         skipEmptyLines: true
                     });
                 
-                debugLog('CSV parsed, rows:', parsed.data.length);
+                    debugLog('CSV parsed successfully', {
+                        rows: parsed.data ? parsed.data.length : 0,
+                        errors: parsed.errors ? parsed.errors.length : 0,
+                        meta: parsed.meta
+                    });
+                    
+                    if (parsed.errors && parsed.errors.length > 0) {
+                        debugLog('CSV parsing errors:', parsed.errors);
+                    }
                 } else if (response.status === 404) {
                     // File doesn't exist yet
                     hasRemoteData = false;
+                    debugLog('File not found, creating empty dataset');
+                    parsed = { data: [] };
                 } else {
                     throw new Error('Failed to load data');
                 }
 
-                if (!parsed.data || parsed.data.length === 0) {
+                if (!parsed || !parsed.data || parsed.data.length === 0) {
                     headersRef = [];
                     allRows = [];
                     filteredRows = [];
@@ -1732,7 +1744,7 @@
 
                 // Step 1: Load from GitHub
                 const response = await fetch(
-                    `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`,
+                    `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/data/products.csv`,
                     {
                         headers: {
                             'Authorization': `token ${authToken}`,
