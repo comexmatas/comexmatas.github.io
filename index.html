@@ -1016,7 +1016,7 @@
         const GITHUB_OWNER = 'comexmatas';
         const GITHUB_REPO = 'comexmatas.github.io';
         const SESSION_KEY = 'github_token';
-        const DEBUG = false; // Set to true for debugging
+        const DEBUG = true; // Set to true for debugging
         
         // UI elements
         const loadButton = document.getElementById('loadButton');
@@ -1630,6 +1630,9 @@
                     fileInfo = await getFileFromGitHub();
                     debugLog('File retrieved from GitHub', { size: fileInfo.content.length, sha: fileInfo.sha.substring(0, 8) });
                     
+                    // Store the current file SHA for update
+                    lastCommitSha = fileInfo.sha;
+                    
                     // Parse the current CSV file
                     const csvText = new TextDecoder().decode(fileInfo.content);
                     const parsed = Papa.parse(csvText, {
@@ -1650,6 +1653,7 @@
                         remoteDatabase = [];
                         hasRemoteData = false;
                         fileInfo = null; // Will create new file
+                        lastCommitSha = null; // No SHA needed for new file creation
                     } else {
                         throw error;
                     }
@@ -1828,6 +1832,9 @@
             
             if (lastCommitSha) {
                 body.sha = lastCommitSha;
+                debugLog('Using SHA for update', { sha: lastCommitSha.substring(0, 8) });
+            } else {
+                debugLog('No SHA available - this might be a new file creation');
             }
             
             const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
