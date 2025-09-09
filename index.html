@@ -1138,8 +1138,10 @@
                 statusText.textContent = `Synced ${changeCount} changes to GitHub`;
                 alert(`Sync completed successfully! ${changeCount} price updates saved to GitHub.`);
                 
-                // Refresh display
-                render();
+                // Re-fetch data from CSV to show latest prices
+                await loadCSV(DEFAULT_FILE);
+                
+                // Note: loadCSV() calls render() internally, so no need to call render() again here
                 
             } catch (error) {
                 console.error('Sync failed:', error);
