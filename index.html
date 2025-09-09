@@ -822,12 +822,8 @@
                 errorById.clear();
                 localChanges.clear();
                 
-                // Load existing prices from CSV into dirtyById (but not localChanges)
-                allRows.forEach(row => {
-                    if (row['competitor_price'] && String(row['competitor_price']).trim()) {
-                        dirtyById.set(row.__id, String(row['competitor_price']).trim());
-                    }
-                });
+                // Don't add existing prices to dirtyById - they should come from CSV data directly
+                // Only user session changes should go into dirtyById and localChanges
                 
                 currentPage = 1;
                 syncButton.disabled = false;
@@ -907,8 +903,8 @@
                 const rowId = r.__id;
                 // Only mark as dirty if it's a user session change
                 const isDirty = localChanges.has(rowId);
-                // Use dirty value if exists, otherwise use original CSV value
-                const priceVal = dirtyById.get(rowId) ?? (r['competitor_price'] || '');
+                // Use user changed value if exists, otherwise use original CSV value
+                const priceVal = localChanges.has(rowId) ? dirtyById.get(rowId) : (r['competitor_price'] || '');
                 const rowClass = isDirty ? ' class="row-dirty"' : '';
                 
                 const cells = visibleHeaders.map(h => {
@@ -1208,10 +1204,13 @@
                         const dataRow = headers.map(h => row[h] || '');
                         const rowId = row.__id;
                         
-                        // Apply changes if any, and mark sync time for local changes
+                        // Apply user session changes and mark sync time
                         if (localChanges.has(rowId) && dirtyById.has(rowId)) {
                             dataRow[priceColumnIndex] = dirtyById.get(rowId);
                             dataRow[syncColumnIndex] = syncTimestamp; // Mark when we synced this change
+                        } else if (row['competitor_price']) {
+                            // Keep existing price from CSV but don't mark as synced (it wasn't a user change)
+                            dataRow[priceColumnIndex] = row['competitor_price'];
                         }
                         
                         return dataRow;
@@ -1267,7 +1266,7 @@
                     extendedRow.push('');
                 }
                 
-                // Apply local changes only if this row was modified locally
+                // Apply local changes only if this row was modified in user session
                 if (localChanges.has(rowId) && dirtyById.has(rowId)) {
                     debugLog('Applying local change to row', { 
                         rowId, 
@@ -1275,8 +1274,9 @@
                         newValue: dirtyById.get(rowId) 
                     });
                     extendedRow[priceColumnIndex] = dirtyById.get(rowId);
-                    extendedRow[syncColumnIndex] = syncTimestamp; // Mark sync timestamp
+                    extendedRow[syncColumnIndex] = syncTimestamp; // Mark sync timestamp for user changes
                 }
+                // Note: Existing prices from remote CSV are preserved as-is
                 
                 return extendedRow;
             });
@@ -1318,7 +1318,8 @@
                 const rowObj = rowToObject(headers, row, idx);
                 const rowId = rowObj.__id;
                 
-                if (localChanges.has(rowId)) {
+                // Only check for conflicts on rows that user actually changed in this session
+                if (localChanges.has(rowId) && dirtyById.has(rowId)) {
                     const remotePrice = row[priceColumnIndex] || '';
                     const localPrice = dirtyById.get(rowId) || '';
                     const remoteSyncTime = syncColumnIndex !== -1 ? row[syncColumnIndex] : '';
