@@ -1056,7 +1056,7 @@
         const GITHUB_OWNER = 'comexmatas';
         const GITHUB_REPO = 'comexmatas.github.io';
         const SESSION_KEY = 'github_token';
-        const DEBUG = true; // Set to true for debugging
+        const DEBUG = false; // Set to true for debugging
         
         // UI elements
         const loadButton = document.getElementById('loadButton');
@@ -1163,7 +1163,7 @@
             
             // Enhanced button event handling for mobile
             addMobileButtonHandler(loadButton, function() {
-                loadDataFromGitHub();
+                smartSync();
             });
 
             addMobileButtonHandler(syncButton, async () => {
@@ -1318,9 +1318,9 @@
             document.getElementById('authContainer').style.display = 'none';
             document.getElementById('mainApp').classList.add('authenticated');
             
-            // Automatically load data from GitHub when authenticated
+            // Automatically sync data from GitHub when authenticated
             setTimeout(() => {
-                loadDataFromGitHub();
+                smartSync();
             }, 100);
         }
 
@@ -1342,122 +1342,8 @@
         }
 
 
-        async function loadDataFromGitHub() {
-            if (!authToken) {
-                errorMessage.innerHTML = `<div class="error">Authentication required to load from GitHub.</div>`;
-                return;
-            }
-
-            try {
-                dataContainer.innerHTML = '<div class="loading">Loading data from GitHub...</div>';
-                errorMessage.innerHTML = '';
-
-                // Load from GitHub using direct API approach
-                const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
-                    headers: {
-                        'Authorization': `token ${authToken}`,
-                        'Accept': 'application/vnd.github.v3+json'
-                    }
-                });
-
-                if (!response.ok) {
-                    throw new Error(`Failed to get file from GitHub: ${response.status} ${response.statusText}`);
-                }
-                
-                const data = await response.json();
-                lastCommitSha = data.sha;
-                
-                // Decode base64 content
-                const csvText = atob(data.content);
-                
-                // Parse CSV using Papa Parse
-                const parsed = Papa.parse(csvText, {
-                    header: true,
-                    dynamicTyping: false,
-                    skipEmptyLines: true
-                });
-                
-                debugLog('CSV parsed, rows:', parsed.data.length);
-
-                if (!parsed.data || parsed.data.length === 0) {
-                    headersRef = [];
-                    allRows = [];
-                    filteredRows = [];
-                    displayEmpty();
-                    return;
-                }
-
-                // Extract headers from the parsed data
-                const headers = Object.keys(parsed.data[0] || {});
-                debugLog('Headers:', headers);
-                debugLog('Data rows count:', parsed.data.length);
-
-                headersRef = headers;
-                allRows = parsed.data.map((row, idx) => {
-                    const obj = {};
-                    headers.forEach(key => {
-                        obj[key] = String(row[key] || '');
-                    });
-                    obj.__rowIndex = idx;
-                    
-                    // Try multiple ways to find product ID
-                    const productIdFields = ['product_id', 'Product ID', 'productid', 'id', 'ID'];
-                    let productId = '';
-                    
-                    for (const field of productIdFields) {
-                        if (obj[field] && String(obj[field]).trim()) {
-                            productId = String(obj[field]).trim();
-                            break;
-                        }
-                    }
-                    
-                    obj.__id = productId || `row_${idx}`;
-                    return obj;
-                }).filter(item => item.__id);
-                filteredRows = allRows;
-                dirtyById.clear();
-                errorById.clear();
-                localChanges.clear();
-                
-                // Store the current file SHA for future sync operations
-                lastCommitSha = fileInfo.sha;
-                
-                currentPage = 1;
-                syncButton.disabled = false;
-                statusText.textContent = `Loaded ${allRows.length} rows from GitHub`;
-                
-                // Try to restore any saved drafts
-                loadDraft();
-                
-                render();
-            } catch (error) {
-                console.error('Error loading CSV from GitHub:', error);
-                debugLog('Error loading CSV from GitHub:', error.message);
-                errorMessage.innerHTML = `<div class="error">Error loading from GitHub: ${error.message}</div>`;
-                dataContainer.innerHTML = '<div class="empty-state">Failed to load data from GitHub.</div>';
-            }
-        }
 
 
-        function rowToObject(headers, row, idx) {
-            const obj = {};
-            headers.forEach((h, i) => { obj[h] = row[i] ?? ''; });
-            obj.__rowIndex = idx;
-            
-            // Try multiple ways to find product ID
-            const productIdFields = ['product_id', 'Product ID', 'productid', 'id', 'ID'];
-            let productId = '';
-            
-            for (const field of productIdFields) {
-                if (obj[field] && String(obj[field]).trim()) {
-                    productId = String(obj[field]).trim();
-                    break;
-                }
-            }
-            
-            obj.__id = productId || `row_${idx}`;
-            return obj;
-        }
 
         function applySearch(query) {
             if (!query) {
