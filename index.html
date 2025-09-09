@@ -468,7 +468,7 @@
                 showStatus('setupStatus', 'Previous token found. Click Connect to reconnect.', 'info');
             }
         });
-
+        
         // Load button click handler
         loadButton.addEventListener('click', async function() {
             if (!githubConfig.token) {
@@ -518,7 +518,7 @@
             try {
                 dataContainer.innerHTML = '<div class="loading">Loading data from repository...</div>';
                 errorMessage.innerHTML = '';
-
+                
                 if (!githubConfig.token) {
                     throw new Error('Not connected to repository. Please connect first.');
                 }
@@ -545,8 +545,14 @@
                 const data = await response.json();
                 lastCommitSha = data.sha;
                 
+                console.log('GitHub API response:', data);
+                console.log('Base64 content length:', data.content.length);
+                console.log('Base64 content preview:', data.content.substring(0, 100));
+                
                 // Decode base64 content - using same method as barcode scanner
                 const content = atob(data.content);
+                console.log('Decoded content length:', content.length);
+                console.log('Decoded content preview:', content.substring(0, 100));
                 
                 // Convert to ArrayBuffer for XLSX processing
                 const arrayBuffer = new ArrayBuffer(content.length);
@@ -554,14 +560,35 @@
                 for (let i = 0; i < content.length; i++) {
                     uint8Array[i] = content.charCodeAt(i);
                 }
+                
+                console.log('ArrayBuffer length:', arrayBuffer.byteLength);
+                console.log('First 20 bytes:', Array.from(uint8Array.slice(0, 20)));
 
                 const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+                console.log('Workbook loaded:', workbook);
+                console.log('Sheet names:', workbook.SheetNames);
 
                 const firstSheetName = workbook.SheetNames[0];
                 const firstSheet = workbook.Sheets[firstSheetName];
+                console.log('First sheet:', firstSheet);
+                console.log('Sheet range:', firstSheet['!ref']);
+                console.log('Sheet keys:', Object.keys(firstSheet));
 
-                const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, blankrows: false });
+                // Try different parsing options
+                const rows1 = XLSX.utils.sheet_to_json(firstSheet, { header: 1, blankrows: false });
+                const rows2 = XLSX.utils.sheet_to_json(firstSheet, { header: 1, blankrows: true });
+                const rows3 = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+                
+                console.log('Rows (blankrows: false):', rows1);
+                console.log('Rows (blankrows: true):', rows2);
+                console.log('Rows (default):', rows3);
+                
+                const rows = rows1;
+                console.log('Parsed rows:', rows);
+                console.log('Number of rows:', rows.length);
+                
                 if (!rows || rows.length === 0) {
+                    console.log('No rows found, displaying empty state');
                     headersRef = [];
                     allRows = [];
                     filteredRows = [];
@@ -570,7 +597,11 @@
                 }
 
                 const headers = rows[0].map(h => String(h ?? '').trim());
+                console.log('Headers:', headers);
+                
                 const dataRows = rows.slice(1).map(r => headers.map((_, idx) => String((r[idx] ?? '')).trim()));
+                console.log('Data rows:', dataRows);
+                console.log('Number of data rows:', dataRows.length);
 
                 headersRef = headers;
                 allRows = dataRows.map((row, idx) => rowToObject(headersRef, row, idx));
@@ -582,6 +613,7 @@
                 currentPage = 1;
                 syncButton.disabled = false; // Always enabled when connected
                 statusText.textContent = `Loaded ${allRows.length} rows from repository`;
+                console.log('About to render with', allRows.length, 'rows');
                 render();
             } catch (error) {
                 console.error('Error loading XLSX:', error);
@@ -610,7 +642,11 @@
         }
 
         function render() {
+            console.log('Render called with filteredRows.length:', filteredRows.length);
+            console.log('filteredRows:', filteredRows);
+            
             if (!filteredRows.length) {
+                console.log('No filtered rows, displaying empty state');
                 displayEmpty();
                 return;
             }
@@ -620,7 +656,11 @@
             const start = (currentPage - 1) * pageSize;
             const pageRows = filteredRows.slice(start, start + pageSize);
 
-            dataContainer.innerHTML = buildTable(headersRef, pageRows) + buildPagination(total, currentPage, totalPages);
+            console.log('Building table with', pageRows.length, 'page rows');
+            const tableHTML = buildTable(headersRef, pageRows) + buildPagination(total, currentPage, totalPages);
+            console.log('Table HTML length:', tableHTML.length);
+            
+            dataContainer.innerHTML = tableHTML;
             updateDirtyStatus();
         }
 
