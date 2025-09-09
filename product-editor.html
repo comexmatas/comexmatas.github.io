@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matas Product Price Editor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #24292e 0%, #0d1117 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #c9d1d9;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #58a6ff, #79c0ff);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 30px rgba(88, 166, 255, 0.3);
+        }
+
+        .header p {
+            color: #8b949e;
+            font-size: 1.1em;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .controls {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .search-box {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 12px 16px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            color: #c9d1d9;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: #58a6ff;
+            background: #0d1117;
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #58a6ff;
+        }
+
+        .stat-label {
+            color: #8b949e;
+            font-size: 0.9em;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: #21262d;
+            color: #c9d1d9;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        button:hover {
+            background: #30363d;
+            border-color: #58a6ff;
+            transform: translateY(-1px);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-primary {
+            background: #238636;
+            border-color: #2ea043;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #2ea043;
+        }
+
+        .btn-danger {
+            background: #da3633;
+            border-color: #f85149;
+            color: white;
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            background: #f85149;
+        }
+
+        .table-container {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .table-header {
+            padding: 24px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .table-header h2 {
+            color: #58a6ff;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .data-table th {
+            background: #161b22;
+            color: #f0883e;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 1px solid #30363d;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .data-table td {
+            padding: 12px;
+            border-bottom: 1px solid #21262d;
+            color: #c9d1d9;
+            vertical-align: top;
+        }
+
+        .data-table tr:hover {
+            background: #161b22;
+        }
+
+        .product-cell {
+            max-width: 300px;
+        }
+
+        .product-name {
+            font-weight: 600;
+            margin-bottom: 4px;
+            color: #58a6ff;
+        }
+
+        .product-id {
+            font-size: 0.85em;
+            color: #8b949e;
+        }
+
+        .brand-cell {
+            max-width: 150px;
+            color: #7ee787;
+        }
+
+        .category-cell {
+            max-width: 150px;
+            color: #ffa657;
+        }
+
+        .price-cell {
+            min-width: 120px;
+        }
+
+        .price-input {
+            width: 100%;
+            padding: 6px 8px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            color: #c9d1d9;
+            font-size: 14px;
+            text-align: right;
+        }
+
+        .price-input:focus {
+            outline: none;
+            border-color: #58a6ff;
+            background: #0d1117;
+        }
+
+        .price-input.changed {
+            border-color: #f0883e;
+            background: #2d2418;
+        }
+
+        .status {
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-weight: 500;
+            animation: slideUp 0.3s ease-out;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status.success {
+            background: #0d2818;
+            color: #3fb950;
+            border: 1px solid #238636;
+        }
+
+        .status.error {
+            background: #2d1418;
+            color: #f85149;
+            border: 1px solid #da3633;
+        }
+
+        .status.info {
+            background: #0d1e33;
+            color: #58a6ff;
+            border: 1px solid #1f6feb;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #8b949e;
+        }
+
+        .spinner {
+            border: 2px solid #30363d;
+            border-top: 2px solid #58a6ff;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .page-info {
+            color: #8b949e;
+            margin: 0 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Matas Product Price Editor</h1>
+            <p>Edit competitor prices for products in the database</p>
+        </div>
+
+        <div class="controls">
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="Search products, brands, or categories...">
+            </div>
+            
+            <div class="stats">
+                <div class="stat">
+                    <div class="stat-number" id="totalProducts">0</div>
+                    <div class="stat-label">Total Products</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-number" id="changedPrices">0</div>
+                    <div class="stat-label">Changed Prices</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-number" id="shownProducts">0</div>
+                    <div class="stat-label">Showing</div>
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button class="btn-primary" onclick="saveChanges()" id="saveBtn" disabled>
+                    💾 Save Changes
+                </button>
+                <button class="btn-danger" onclick="resetChanges()">
+                    🔄 Reset Changes
+                </button>
+                <button onclick="downloadCSV()">
+                    📥 Download CSV
+                </button>
+            </div>
+        </div>
+
+        <div id="statusMessage" class="status" style="display: none;"></div>
+
+        <div class="table-container">
+            <div class="table-header">
+                <h2>📋 Product Database</h2>
+            </div>
+            
+            <div style="overflow-x: auto; max-height: 70vh; overflow-y: auto;">
+                <table class="data-table" id="productsTable">
+                    <thead>
+                        <tr>
+                            <th>Product</th>
+                            <th>Brand</th>
+                            <th>Category</th>
+                            <th>Competitor Price (DKK)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="productsTableBody">
+                        <tr>
+                            <td colspan="4" class="empty-state">
+                                <div class="spinner"></div>
+                                Loading products...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="pagination">
+            <button onclick="previousPage()" id="prevBtn" disabled>← Previous</button>
+            <div class="page-info" id="pageInfo">Page 1 of 1</div>
+            <button onclick="nextPage()" id="nextBtn" disabled>Next →</button>
+        </div>
+    </div>
+
+    <script>
+        let productsData = [];
+        let filteredData = [];
+        let changedPrices = new Map(); // Track price changes
+        let currentPage = 1;
+        const itemsPerPage = 50;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadProductsData();
+            
+            // Setup search
+            document.getElementById('searchInput').addEventListener('input', (e) => {
+                searchProducts(e.target.value);
+            });
+        });
+
+        // Load products from CSV
+        async function loadProductsData() {
+            try {
+                showStatus('Loading product database...', 'info');
+                
+                const response = await fetch('./data/products.csv');
+                if (!response.ok) {
+                    throw new Error('Failed to load products database');
+                }
+                
+                const csvText = await response.text();
+                const parsed = Papa.parse(csvText, {
+                    header: true,
+                    dynamicTyping: false,
+                    skipEmptyLines: true
+                });
+                
+                productsData = parsed.data.map(row => ({
+                    productId: String(row['Product ID'] || ''),
+                    name: String(row['Product'] || ''),
+                    brand: String(row['Brand'] || ''),
+                    category: String(row['Category'] || ''),
+                    url: String(row['URL'] || ''),
+                    imageUrl: String(row['Image URL'] || ''),
+                    price: String(row['competitor_price'] || ''),
+                    lastSyncedAt: String(row['lastSyncedAt'] || '')
+                })).filter(item => item.productId);
+                
+                filteredData = [...productsData];
+                currentPage = 1;
+                
+                updateStats();
+                displayProducts();
+                updatePagination();
+                
+                showStatus(`✅ Loaded ${productsData.length} products`, 'success');
+                
+            } catch (error) {
+                console.error('Error loading products:', error);
+                showStatus(`❌ Error loading products: ${error.message}`, 'error');
+            }
+        }
+
+        function searchProducts(query) {
+            if (!query.trim()) {
+                filteredData = [...productsData];
+            } else {
+                const searchTerm = query.toLowerCase();
+                filteredData = productsData.filter(product => 
+                    product.name.toLowerCase().includes(searchTerm) ||
+                    product.brand.toLowerCase().includes(searchTerm) ||
+                    product.category.toLowerCase().includes(searchTerm) ||
+                    product.productId.includes(searchTerm)
+                );
+            }
+            
+            currentPage = 1;
+            updateStats();
+            displayProducts();
+            updatePagination();
+        }
+
+        function displayProducts() {
+            const tbody = document.getElementById('productsTableBody');
+            
+            if (filteredData.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="4" class="empty-state">
+                            No products found
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            const startIndex = (currentPage - 1) * itemsPerPage;
+            const endIndex = startIndex + itemsPerPage;
+            const pageData = filteredData.slice(startIndex, endIndex);
+
+            const html = pageData.map(product => {
+                const currentPrice = changedPrices.get(product.productId) ?? product.price;
+                const hasChanged = changedPrices.has(product.productId);
+                
+                return `
+                    <tr>
+                        <td class="product-cell">
+                            <div class="product-name">${escapeHtml(product.name)}</div>
+                            <div class="product-id">ID: ${product.productId}</div>
+                        </td>
+                        <td class="brand-cell">${escapeHtml(product.brand)}</td>
+                        <td class="category-cell">${escapeHtml(product.category)}</td>
+                        <td class="price-cell">
+                            <input type="number" 
+                                   class="price-input ${hasChanged ? 'changed' : ''}" 
+                                   value="${currentPrice}" 
+                                   step="0.01" 
+                                   min="0"
+                                   data-product-id="${product.productId}"
+                                   data-original-price="${product.price}"
+                                   onchange="updatePrice(this)">
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            tbody.innerHTML = html;
+        }
+
+        function updatePrice(input) {
+            const productId = input.dataset.productId;
+            const originalPrice = input.dataset.originalPrice;
+            const newPrice = input.value;
+
+            if (newPrice !== originalPrice) {
+                changedPrices.set(productId, newPrice);
+                input.classList.add('changed');
+            } else {
+                changedPrices.delete(productId);
+                input.classList.remove('changed');
+            }
+
+            updateStats();
+            updateSaveButton();
+        }
+
+        function updateStats() {
+            document.getElementById('totalProducts').textContent = productsData.length;
+            document.getElementById('changedPrices').textContent = changedPrices.size;
+            document.getElementById('shownProducts').textContent = filteredData.length;
+        }
+
+        function updateSaveButton() {
+            const saveBtn = document.getElementById('saveBtn');
+            saveBtn.disabled = changedPrices.size === 0;
+            
+            if (changedPrices.size > 0) {
+                saveBtn.textContent = `💾 Save ${changedPrices.size} Changes`;
+            } else {
+                saveBtn.textContent = '💾 Save Changes';
+            }
+        }
+
+        function saveChanges() {
+            if (changedPrices.size === 0) return;
+
+            const numChanges = changedPrices.size;
+
+            // Apply changes to the main data
+            changedPrices.forEach((newPrice, productId) => {
+                const product = productsData.find(p => p.productId === productId);
+                if (product) {
+                    product.price = newPrice;
+                    product.lastSyncedAt = new Date().toISOString();
+                }
+            });
+
+            // Clear the changes tracking
+            changedPrices.clear();
+            
+            // Update display
+            displayProducts();
+            updateStats();
+            updateSaveButton();
+            
+            showStatus(`✅ Saved changes to ${numChanges} products`, 'success');
+        }
+
+        function resetChanges() {
+            if (changedPrices.size === 0) return;
+
+            if (confirm(`Reset ${changedPrices.size} unsaved changes?`)) {
+                changedPrices.clear();
+                displayProducts();
+                updateStats();
+                updateSaveButton();
+                showStatus('Changes reset', 'info');
+            }
+        }
+
+        function downloadCSV() {
+            // Create CSV with current data
+            const csvData = productsData.map(product => ({
+                'Product ID': product.productId,
+                'Product': product.name,
+                'Brand': product.brand,
+                'Category': product.category,
+                'URL': product.url,
+                'Image URL': product.imageUrl,
+                'competitor_price': product.price,
+                'lastSyncedAt': product.lastSyncedAt
+            }));
+
+            const csv = Papa.unparse(csvData);
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `products_updated_${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+            
+            showStatus('✅ CSV downloaded', 'success');
+        }
+
+        // Pagination
+        function updatePagination() {
+            const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+            
+            document.getElementById('prevBtn').disabled = currentPage <= 1;
+            document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+            document.getElementById('pageInfo').textContent = `Page ${currentPage} of ${totalPages}`;
+        }
+
+        function previousPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                displayProducts();
+                updatePagination();
+            }
+        }
+
+        function nextPage() {
+            const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+            if (currentPage < totalPages) {
+                currentPage++;
+                displayProducts();
+                updatePagination();
+            }
+        }
+
+        // Utility functions
+        function showStatus(message, type) {
+            const element = document.getElementById('statusMessage');
+            element.innerHTML = message;
+            element.className = `status ${type}`;
+            element.style.display = 'flex';
+            
+            if (type !== 'info') {
+                setTimeout(() => {
+                    element.style.display = 'none';
+                }, 5000);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Warn before leaving with unsaved changes
+        window.addEventListener('beforeunload', (e) => {
+            if (changedPrices.size > 0) {
+                e.preventDefault();
+                e.returnValue = 'You have unsaved price changes. Are you sure you want to leave?';
+            }
+        });
+    </script>
+</body>
+</html>
