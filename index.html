@@ -821,6 +821,14 @@
                 dirtyById.clear();
                 errorById.clear();
                 localChanges.clear();
+                
+                // Load existing prices from CSV into dirtyById (but not localChanges)
+                allRows.forEach(row => {
+                    if (row['competitor_price'] && String(row['competitor_price']).trim()) {
+                        dirtyById.set(row.__id, String(row['competitor_price']).trim());
+                    }
+                });
+                
                 currentPage = 1;
                 syncButton.disabled = false;
                 statusText.textContent = `Loaded ${allRows.length} rows`;
@@ -897,8 +905,10 @@
                 </thead>`;
             const tbodyRows = rows.map(r => {
                 const rowId = r.__id;
-                const isDirty = dirtyById.has(rowId);
-                const priceVal = dirtyById.get(rowId) ?? '';
+                // Only mark as dirty if it's a user session change
+                const isDirty = localChanges.has(rowId);
+                // Use dirty value if exists, otherwise use original CSV value
+                const priceVal = dirtyById.get(rowId) ?? (r['competitor_price'] || '');
                 const rowClass = isDirty ? ' class="row-dirty"' : '';
                 
                 const cells = visibleHeaders.map(h => {
@@ -1026,10 +1036,12 @@
             
             const tr = input.closest('tr');
             if (tr) {
-                if (dirtyById.has(rowId)) tr.classList.add('row-dirty'); 
+                // Only mark row as dirty if it's a user session change
+                if (localChanges.has(rowId)) tr.classList.add('row-dirty'); 
                 else tr.classList.remove('row-dirty');
             }
-            dirtyText.textContent = dirtyById.size ? ` • ${dirtyById.size} edited` : '';
+            // Show count of user session edits only
+            dirtyText.textContent = localChanges.size ? ` • ${localChanges.size} edited` : '';
             syncButton.disabled = errorById.size > 0;
         }
 
@@ -1050,13 +1062,14 @@
             }
 
             try {
-                debugLog('Starting sync process');
+                debugLog('Starting smart sync process');
                 statusText.textContent = 'Syncing with GitHub...';
                 syncButton.disabled = true;
                 syncButton.textContent = 'Syncing...';
 
                 // Step 1: Load current file from GitHub
                 let fileInfo, remoteData = [];
+                let hasRemoteData = false;
                 
                 try {
                     fileInfo = await getFileFromGitHub();
@@ -1071,12 +1084,14 @@
                     });
                     
                     remoteData = parsed.data;
+                    hasRemoteData = true;
                     debugLog('Remote CSV parsed', { rows: remoteData.length });
                 } catch (error) {
                     if (error.message.includes('404')) {
                         // File doesn't exist, use local data structure
                         debugLog('File not found on GitHub, using local structure');
-                        remoteData = [headersRef, ...allRows.map(row => headersRef.map(h => row[h] || ''))];
+                        remoteData = [];
+                        hasRemoteData = false;
                         fileInfo = null; // Will create new file
                     } else {
                         throw error;
@@ -1084,64 +1099,45 @@
                 }
                 
                 // Step 2: Merge local changes with remote data
-                const mergedData = mergeCSVData(remoteData, dirtyById);
+                const mergedData = smartMergeCSVData(remoteData, localChanges, hasRemoteData);
                 debugLog('Data merged', { originalRows: remoteData.length, mergedRows: mergedData.length });
                 
-                // Step 3: Convert merged data back to CSV
+                // Step 3: Check for overwrites and warn user
+                const overwrites = detectPriceOverwrites(remoteData, localChanges);
+                
+                if (overwrites.length > 0 && localChanges.size > 0) {
+                    const message = `This sync will overwrite ${overwrites.length} remote price(s) with your local changes:\n\n` +
+                                  overwrites.slice(0, 5).map(item => `• ${item.id}: ${item.oldPrice} → ${item.newPrice}`).join('\n') +
+                                  (overwrites.length > 5 ? `\n... and ${overwrites.length - 5} more` : '') +
+                                  '\n\nContinue?';
+                    
+                    if (!confirm(message)) {
+                        statusText.textContent = 'Sync cancelled by user';
+                        return;
+                    }
+                }
+                
+                // Step 4: Convert merged data back to CSV
                 const csvContent = Papa.unparse(mergedData, {
                     header: false
                 });
                 
-                // Step 4: Update GitHub file
-                const base64Content = btoa(unescape(encodeURIComponent(csvContent)));
+                // Step 5: Push to GitHub
+                await pushCSVToGitHub(csvContent, fileInfo);
                 
-                const commitMessage = `Update prices: ${dirtyById.size} changes at ${new Date().toLocaleString()}`;
-                
-                const updatePayload = {
-                    message: commitMessage,
-                    content: base64Content,
-                    branch: 'main'
-                };
-                
-                // Only include SHA if file exists
-                if (fileInfo && fileInfo.sha) {
-                    updatePayload.sha = fileInfo.sha;
-                }
-                
-                const updateResponse = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
-                    method: 'PUT',
-                    headers: {
-                        'Authorization': `token ${authToken}`,
-                        'Accept': 'application/vnd.github.v3+json',
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(updatePayload)
-                });
-                
-                if (!updateResponse.ok) {
-                    const errorData = await updateResponse.json();
-                    throw new Error(`GitHub update failed: ${errorData.message || updateResponse.statusText}`);
-                }
-                
-                debugLog('GitHub file updated successfully');
-                
-                // Step 5: Update local state
-                const responseData = await updateResponse.json();
-                const changeCount = dirtyById.size;
-                lastCommitSha = responseData.content.sha;
-                lastSyncTime = new Date().toISOString();
-                
-                // Clear local changes
-                dirtyById.clear();
+                // Step 6: Clear local changes tracking
+                const changeCount = localChanges.size;
                 localChanges.clear();
                 
+                // Step 7: Update local state
+                lastSyncTime = new Date().toISOString();
+                
+                // Step 8: Update UI and re-fetch data
                 statusText.textContent = `Synced ${changeCount} changes to GitHub`;
                 alert(`Sync completed successfully! ${changeCount} price updates saved to GitHub.`);
                 
-                // Re-fetch data from CSV to show latest prices
-                await loadCSV(DEFAULT_FILE);
-                
-                // Note: loadCSV() calls render() internally, so no need to call render() again here
+                // Trigger Load Data button to re-fetch latest data
+                loadButton.click();
                 
             } catch (error) {
                 console.error('Sync failed:', error);
@@ -1174,13 +1170,15 @@
             };
         }
         
-        function mergeCSVData(remoteData, changes) {
-            debugLog('mergeCSVData called with', { 
+        function smartMergeCSVData(remoteData, localChanges, hasRemoteData) {
+            const syncTimestamp = new Date().toISOString();
+            debugLog('smartMergeCSVData called with', { 
                 remoteRowsCount: remoteData ? remoteData.length : 'N/A',
-                changesSize: changes ? changes.size : 'N/A'
+                localChangesSize: localChanges ? localChanges.size : 'N/A',
+                hasRemoteData
             });
             
-            if (!remoteData || remoteData.length === 0) {
+            if (!hasRemoteData || !remoteData || remoteData.length === 0) {
                 debugLog('No remote data, using local structure');
                 // Return local data structure with changes applied
                 if (headersRef && headersRef.length > 0) {
@@ -1196,13 +1194,24 @@
                         priceColumnIndex = headers.length - 1;
                     }
                     
+                    // Add lastSyncedAt column for tracking
+                    let syncColumnIndex = headers.findIndex(h => 
+                        String(h || '').toLowerCase().includes('lastsyncedAt')
+                    );
+                    
+                    if (syncColumnIndex === -1) {
+                        headers.push('lastSyncedAt');
+                        syncColumnIndex = headers.length - 1;
+                    }
+                    
                     const dataRows = allRows.map(row => {
                         const dataRow = headers.map(h => row[h] || '');
                         const rowId = row.__id;
                         
-                        // Apply changes if any
-                        if (changes.has(rowId)) {
-                            dataRow[priceColumnIndex] = changes.get(rowId);
+                        // Apply changes if any, and mark sync time for local changes
+                        if (localChanges.has(rowId) && dirtyById.has(rowId)) {
+                            dataRow[priceColumnIndex] = dirtyById.get(rowId);
+                            dataRow[syncColumnIndex] = syncTimestamp; // Mark when we synced this change
                         }
                         
                         return dataRow;
@@ -1216,10 +1225,10 @@
             const headers = remoteData[0] || [];
             const dataRows = remoteData.slice(1);
             
-            debugLog('mergeCSVData input', { 
+            debugLog('smartMergeCSVData input', { 
                 headersCount: headers.length, 
                 dataRowsCount: dataRows.length,
-                changesCount: changes.size,
+                localChangesCount: localChanges.size,
                 sampleHeader: headers.slice(0, 5)
             });
             
@@ -1236,7 +1245,18 @@
                 debugLog('Found existing competitor_price column at index', priceColumnIndex);
             }
             
-            // Update data rows with changes
+            // Find or add lastSyncedAt column for tracking
+            let syncColumnIndex = headers.findIndex(h => 
+                String(h || '').toLowerCase().includes('lastsyncedAt')
+            );
+            
+            if (syncColumnIndex === -1) {
+                headers.push('lastSyncedAt');
+                syncColumnIndex = headers.length - 1;
+                debugLog('Added lastSyncedAt column at index', syncColumnIndex);
+            }
+            
+            // Update data rows with smart merging
             const updatedDataRows = dataRows.map((row, idx) => {
                 const rowObj = rowToObject(headers, row, idx);
                 const rowId = rowObj.__id;
@@ -1247,10 +1267,15 @@
                     extendedRow.push('');
                 }
                 
-                // Apply changes if any
-                if (changes.has(rowId)) {
-                    debugLog('Applying change to row', { rowId, oldValue: extendedRow[priceColumnIndex], newValue: changes.get(rowId) });
-                    extendedRow[priceColumnIndex] = changes.get(rowId);
+                // Apply local changes only if this row was modified locally
+                if (localChanges.has(rowId) && dirtyById.has(rowId)) {
+                    debugLog('Applying local change to row', { 
+                        rowId, 
+                        oldValue: extendedRow[priceColumnIndex], 
+                        newValue: dirtyById.get(rowId) 
+                    });
+                    extendedRow[priceColumnIndex] = dirtyById.get(rowId);
+                    extendedRow[syncColumnIndex] = syncTimestamp; // Mark sync timestamp
                 }
                 
                 return extendedRow;
@@ -1258,13 +1283,107 @@
             
             const result = [headers, ...updatedDataRows];
             
-            debugLog('mergeCSVData output', { 
+            debugLog('smartMergeCSVData output', { 
                 headersCount: headers.length, 
                 updatedRowsCount: updatedDataRows.length,
                 resultLength: result.length
             });
             
             return result;
+        }
+
+        function detectPriceOverwrites(remoteData, localChanges) {
+            const overwrites = [];
+            
+            if (!remoteData || remoteData.length === 0 || localChanges.size === 0) {
+                return overwrites;
+            }
+            
+            const headers = remoteData[0] || [];
+            const dataRows = remoteData.slice(1);
+            
+            // Find competitor_price and lastSyncedAt columns
+            const priceColumnIndex = headers.findIndex(h => 
+                String(h || '').toLowerCase().includes('competitor_price')
+            );
+            const syncColumnIndex = headers.findIndex(h => 
+                String(h || '').toLowerCase().includes('lastsyncedAt')
+            );
+            
+            if (priceColumnIndex === -1) {
+                return overwrites; // No price column, no overwrites possible
+            }
+            
+            dataRows.forEach((row, idx) => {
+                const rowObj = rowToObject(headers, row, idx);
+                const rowId = rowObj.__id;
+                
+                if (localChanges.has(rowId)) {
+                    const remotePrice = row[priceColumnIndex] || '';
+                    const localPrice = dirtyById.get(rowId) || '';
+                    const remoteSyncTime = syncColumnIndex !== -1 ? row[syncColumnIndex] : '';
+                    
+                    // Check if remote has been modified since our last sync
+                    if (remotePrice && remotePrice !== localPrice) {
+                        let shouldWarn = true;
+                        
+                        if (remoteSyncTime && lastSyncTime) {
+                            const remoteSync = new Date(remoteSyncTime);
+                            const ourLastSync = new Date(lastSyncTime);
+                            // Only warn if remote was modified after our last sync
+                            shouldWarn = remoteSync > ourLastSync;
+                        }
+                        
+                        if (shouldWarn) {
+                            overwrites.push({
+                                id: rowId,
+                                oldPrice: remotePrice,
+                                newPrice: localPrice
+                            });
+                        }
+                    }
+                }
+            });
+            
+            debugLog('Detected overwrites', overwrites);
+            return overwrites;
+        }
+
+        async function pushCSVToGitHub(csvContent, fileInfo) {
+            const base64Content = btoa(unescape(encodeURIComponent(csvContent)));
+            const commitMessage = `Smart sync: ${localChanges.size} price changes at ${new Date().toLocaleString()}`;
+            
+            const updatePayload = {
+                message: commitMessage,
+                content: base64Content,
+                branch: 'main'
+            };
+            
+            // Only include SHA if file exists
+            if (fileInfo && fileInfo.sha) {
+                updatePayload.sha = fileInfo.sha;
+            }
+            
+            const updateResponse = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `token ${authToken}`,
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updatePayload)
+            });
+            
+            if (!updateResponse.ok) {
+                const errorData = await updateResponse.json();
+                throw new Error(`GitHub update failed: ${errorData.message || updateResponse.statusText}`);
+            }
+            
+            const responseData = await updateResponse.json();
+            lastCommitSha = responseData.content.sha;
+            debugLog('GitHub file updated successfully with smart sync');
+            
+            return responseData;
         }
 
         function displayEmpty() {
