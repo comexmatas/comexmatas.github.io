@@ -1163,7 +1163,11 @@
             
             // Enhanced button event handling for mobile
             addMobileButtonHandler(loadButton, function() {
-                loadData(DEFAULT_FILE);
+                if (isAuthenticated) {
+                    loadDataFromGitHub();
+                } else {
+                    loadData(DEFAULT_FILE); // Fallback to local file if not authenticated
+                }
             });
 
             addMobileButtonHandler(syncButton, async () => {
@@ -1317,6 +1321,11 @@
         function showMainApp() {
             document.getElementById('authContainer').style.display = 'none';
             document.getElementById('mainApp').classList.add('authenticated');
+            
+            // Automatically load data from GitHub when authenticated
+            setTimeout(() => {
+                loadDataFromGitHub();
+            }, 100);
         }
 
         function logout() {
@@ -1341,6 +1350,72 @@
                 loadCSV(filePath);
             } else {
                 errorMessage.innerHTML = `<div class="error">Unsupported file type. Please select a .csv file.</div>`;
+            }
+        }
+
+        async function loadDataFromGitHub() {
+            if (!authToken) {
+                errorMessage.innerHTML = `<div class="error">Authentication required to load from GitHub.</div>`;
+                return;
+            }
+
+            try {
+                dataContainer.innerHTML = '<div class="loading">Loading data from GitHub...</div>';
+                errorMessage.innerHTML = '';
+                debugLog('Loading CSV file from GitHub');
+
+                // Use the same logic as in sync to get the file from GitHub
+                const fileInfo = await getFileFromGitHub();
+                const csvText = new TextDecoder().decode(fileInfo.content);
+                
+                debugLog('GitHub file loaded, size:', csvText.length);
+                
+                // Parse CSV using Papa Parse
+                const parsed = Papa.parse(csvText, {
+                    header: false,
+                    dynamicTyping: false,
+                    skipEmptyLines: true
+                });
+                
+                debugLog('CSV parsed, rows:', parsed.data.length);
+
+                if (!parsed.data || parsed.data.length === 0) {
+                    headersRef = [];
+                    allRows = [];
+                    filteredRows = [];
+                    displayEmpty();
+                    return;
+                }
+
+                const headers = parsed.data[0].map(h => String(h ?? '').trim()).filter(h => h);
+                const dataRows = parsed.data.slice(1).map(r => headers.map((_, idx) => String((r[idx] ?? '')).trim()));
+
+                debugLog('Headers:', headers);
+                debugLog('Data rows count:', dataRows.length);
+
+                headersRef = headers;
+                allRows = dataRows.map((row, idx) => rowToObject(headersRef, row, idx));
+                filteredRows = allRows;
+                dirtyById.clear();
+                errorById.clear();
+                localChanges.clear();
+                
+                // Store the current file SHA for future sync operations
+                lastCommitSha = fileInfo.sha;
+                
+                currentPage = 1;
+                syncButton.disabled = false;
+                statusText.textContent = `Loaded ${allRows.length} rows from GitHub`;
+                
+                // Try to restore any saved drafts
+                loadDraft();
+                
+                render();
+            } catch (error) {
+                console.error('Error loading CSV from GitHub:', error);
+                debugLog('Error loading CSV from GitHub:', error.message);
+                errorMessage.innerHTML = `<div class="error">Error loading from GitHub: ${error.message}</div>`;
+                dataContainer.innerHTML = '<div class="empty-state">Failed to load data from GitHub.</div>';
             }
         }
 
@@ -1399,7 +1474,7 @@
                 
                 currentPage = 1;
                 syncButton.disabled = false;
-                statusText.textContent = `Loaded ${allRows.length} rows`;
+                statusText.textContent = `Loaded ${allRows.length} rows from local file`;
                 
                 // Try to restore any saved drafts
                 loadDraft();
@@ -1689,6 +1764,9 @@
                 statusText.textContent = 'Syncing with GitHub...';
                 syncButton.disabled = true;
                 syncButton.textContent = 'Syncing...';
+                
+                // Clear draft immediately when sync starts to prevent restoration issues
+                localStorage.removeItem('priceDraft');
 
                 // Step 1: Load current file from GitHub
                 let fileInfo, remoteDatabase = [];
@@ -2167,8 +2245,20 @@
                     const draftData = JSON.parse(savedDraft);
                     const draftAge = Date.now() - new Date(draftData.timestamp).getTime();
                     
-                    // Only restore draft if it's less than 24 hours old
-                    if (draftAge < 24 * 60 * 60 * 1000) {
+                    // Only restore draft if it's less than 1 hour old (reduced from 24 hours)
+                    // This prevents old synced changes from being restored as new drafts
+                    if (draftAge < 1 * 60 * 60 * 1000) {
+                        // Check if we have a recent sync time
+                        const lastSync = localStorage.getItem('lastSyncTime');
+                        const draftTime = new Date(draftData.timestamp);
+                        
+                        // If draft is older than last sync, don't restore it
+                        if (lastSync && new Date(lastSync) > draftTime) {
+                            debugLog('Draft is older than last sync, not restoring');
+                            localStorage.removeItem('priceDraft');
+                            return;
+                        }
+                        
                         // Only restore draft changes that are actual user modifications
                         // (not existing prices from CSV)
                         Object.entries(draftData.changes).forEach(([key, value]) => {
@@ -2177,7 +2267,7 @@
                             const originalPrice = originalRow ? (originalRow['Price'] || originalRow['price'] || originalRow['competitor_price'] || '') : '';
                             
                             // Only restore if the draft value is different from original CSV
-                            if (value !== originalPrice) {
+                            if (value !== originalPrice && value.trim() !== '') {
                                 dirtyById.set(key, value);
                                 localChanges.add(key);
                                 debugLog('Restored draft change', { key, originalPrice, draftValue: value });
