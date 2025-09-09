@@ -1369,25 +1369,27 @@
                     }
                 );
 
-                if (!response.ok) {
-                    throw new Error(`Failed to load file from GitHub: ${response.status} ${response.statusText}`);
-                }
-
-                const data = await response.json();
-                lastCommitSha = data.sha;
-                
-                // Decode base64 content
-                const csvText = atob(data.content);
-                debugLog('File loaded from GitHub, size:', csvText.length);
-                
-                // Parse CSV using Papa Parse with headers (like in attemptSync)
-                const parsed = Papa.parse(csvText, {
-                    header: true,
-                    dynamicTyping: false,
-                    skipEmptyLines: true
-                });
+                if (response.ok) {
+                    const data = await response.json();
+                    lastCommitSha = data.sha;
+                    
+                    // Decode base64 content
+                    const content = atob(data.content);
+                    
+                    // Parse CSV
+                    const parsed = Papa.parse(content, {
+                        header: true,
+                        dynamicTyping: false,
+                        skipEmptyLines: true
+                    });
                 
                 debugLog('CSV parsed, rows:', parsed.data.length);
+                } else if (response.status === 404) {
+                    // File doesn't exist yet
+                    hasRemoteData = false;
+                } else {
+                    throw new Error('Failed to load data');
+                }
 
                 if (!parsed.data || parsed.data.length === 0) {
                     headersRef = [];
