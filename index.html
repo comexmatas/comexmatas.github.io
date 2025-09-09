@@ -6,15 +6,13 @@
     <title>Normal Prices Registry</title>
     <style>
         :root {
-            --matas-navy: #1e3a5f;
+            --matas-navy: #002945;
             --matas-blue: #4a90c2;
-            --matas-light-blue: #a8d0f0;
-            --matas-coral: #ff6b8a;
-            --matas-pink: #ffb3c6;
+            --matas-light-blue: #e3f2fd;
             --matas-white: #ffffff;
             --matas-light-gray: #f8f9fa;
             --matas-gray: #6c757d;
-            --matas-text: #2c3e50;
+            --matas-text: #333333;
         }
 
         body {
@@ -22,7 +20,7 @@
             max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
-            background: linear-gradient(135deg, var(--matas-light-blue) 0%, var(--matas-white) 50%, var(--matas-pink) 100%);
+            background: var(--matas-white);
             min-height: 100vh;
             color: var(--matas-text);
             position: relative;
@@ -39,9 +37,9 @@
                 repeating-linear-gradient(
                     45deg,
                     transparent,
-                    transparent 20px,
-                    rgba(74, 144, 194, 0.03) 20px,
-                    rgba(74, 144, 194, 0.03) 40px
+                    transparent 30px,
+                    rgba(74, 144, 194, 0.08) 30px,
+                    rgba(74, 144, 194, 0.08) 60px
                 );
             z-index: -1;
             pointer-events: none;
@@ -52,42 +50,9 @@
             margin-bottom: 40px;
             background: var(--matas-white);
             padding: 40px 30px;
-            border-radius: 20px;
-            box-shadow: 0 10px 30px rgba(30, 58, 95, 0.1);
-            position: relative;
-            overflow: hidden;
-            border: 2px solid transparent;
-            background-clip: padding-box;
-        }
-
-        .header::before {
-            content: '';
-            position: absolute;
-            top: -2px;
-            left: -2px;
-            right: -2px;
-            bottom: -2px;
-            background: linear-gradient(135deg, var(--matas-blue), var(--matas-coral));
-            border-radius: 22px;
-            z-index: -1;
-        }
-
-        .header::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            right: 0;
-            width: 100px;
-            height: 100px;
-            background: repeating-linear-gradient(
-                45deg,
-                var(--matas-light-blue),
-                var(--matas-light-blue) 8px,
-                transparent 8px,
-                transparent 16px
-            );
-            opacity: 0.3;
-            border-radius: 0 20px 0 0;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 41, 69, 0.1);
+            border: 1px solid var(--matas-light-blue);
         }
         
         .header h1 {
@@ -111,29 +76,10 @@
         .controls {
             background: var(--matas-white);
             padding: 25px;
-            border-radius: 16px;
-            box-shadow: 0 8px 25px rgba(30, 58, 95, 0.08);
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 41, 69, 0.08);
             margin-bottom: 25px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .controls::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 60px;
-            height: 60px;
-            background: repeating-linear-gradient(
-                135deg,
-                var(--matas-coral),
-                var(--matas-coral) 6px,
-                transparent 6px,
-                transparent 12px
-            );
-            opacity: 0.15;
-            border-radius: 16px 0 0 0;
+            border: 1px solid var(--matas-light-blue);
         }
         
         .controls-row {
@@ -164,49 +110,21 @@
         }
         
         .load-button, .sync-button {
-            background: linear-gradient(135deg, var(--matas-blue), var(--matas-navy));
+            background: var(--matas-navy);
             color: white;
             border: none;
             padding: 12px 24px;
-            border-radius: 12px;
+            border-radius: 8px;
             cursor: pointer;
             font-size: 14px;
             font-weight: 600;
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-            z-index: 1;
-        }
-
-        .load-button::before, .sync-button::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: repeating-linear-gradient(
-                45deg,
-                transparent,
-                transparent 4px,
-                rgba(255, 255, 255, 0.1) 4px,
-                rgba(255, 255, 255, 0.1) 8px
-            );
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }
-        
-        .sync-button { 
-            background: linear-gradient(135deg, var(--matas-coral), var(--matas-pink)); 
+            transition: all 0.2s ease;
         }
         
         .load-button:hover, .sync-button:hover { 
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(30, 58, 95, 0.2);
-        }
-
-        .load-button:hover::before, .sync-button:hover::before {
-            opacity: 1;
+            background: var(--matas-blue);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 41, 69, 0.3);
         }
         
         .load-button:disabled, .sync-button:disabled {
@@ -228,28 +146,10 @@
         
         .table-container {
             background: var(--matas-white);
-            border-radius: 16px;
-            box-shadow: 0 8px 25px rgba(30, 58, 95, 0.08);
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 41, 69, 0.08);
             overflow: auto;
-            position: relative;
-        }
-
-        .table-container::before {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            right: 0;
-            width: 80px;
-            height: 80px;
-            background: repeating-linear-gradient(
-                -45deg,
-                var(--matas-light-blue),
-                var(--matas-light-blue) 6px,
-                transparent 6px,
-                transparent 12px
-            );
-            opacity: 0.2;
-            border-radius: 0 0 16px 0;
+            border: 1px solid var(--matas-light-blue);
         }
         
         table {
@@ -258,7 +158,7 @@
         }
         
         th {
-            background: linear-gradient(135deg, var(--matas-navy), var(--matas-blue));
+            background: var(--matas-navy);
             color: white;
             padding: 16px 12px;
             text-align: left;
@@ -266,7 +166,7 @@
             position: sticky;
             top: 0;
             z-index: 2;
-            font-size: 14px;
+            font-size: 13px;
             letter-spacing: 0.5px;
             text-transform: uppercase;
         }
@@ -281,6 +181,27 @@
         
         tr:hover {
             background: linear-gradient(90deg, rgba(168, 208, 240, 0.1), rgba(255, 179, 198, 0.1));
+        }
+
+        /* Product link styling */
+        td a {
+            color: var(--matas-blue);
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+
+        td a:hover {
+            color: var(--matas-navy);
+            text-decoration: underline;
+            text-decoration-color: var(--matas-coral);
+            text-decoration-thickness: 2px;
+            text-underline-offset: 3px;
+        }
+
+        td a:active {
+            color: var(--matas-coral);
         }
         
         .error {
@@ -416,7 +337,7 @@
             align-items: center;
             justify-content: center;
             min-height: 100vh;
-            background: linear-gradient(135deg, var(--matas-light-blue) 0%, var(--matas-white) 50%, var(--matas-pink) 100%);
+            background: var(--matas-white);
             position: relative;
         }
 
@@ -432,15 +353,8 @@
                     45deg,
                     transparent,
                     transparent 30px,
-                    rgba(74, 144, 194, 0.05) 30px,
-                    rgba(74, 144, 194, 0.05) 60px
-                ),
-                repeating-linear-gradient(
-                    -45deg,
-                    transparent,
-                    transparent 30px,
-                    rgba(255, 107, 138, 0.05) 30px,
-                    rgba(255, 107, 138, 0.05) 60px
+                    rgba(74, 144, 194, 0.08) 30px,
+                    rgba(74, 144, 194, 0.08) 60px
                 );
             z-index: 1;
             pointer-events: none;
@@ -449,44 +363,14 @@
         .auth-card {
             background: var(--matas-white);
             padding: 50px 40px;
-            border-radius: 24px;
-            box-shadow: 0 20px 60px rgba(30, 58, 95, 0.15);
+            border-radius: 16px;
+            box-shadow: 0 8px 30px rgba(0, 41, 69, 0.15);
             width: 100%;
             max-width: 420px;
             text-align: center;
             position: relative;
             z-index: 2;
-            overflow: hidden;
-        }
-
-        .auth-card::before {
-            content: '';
-            position: absolute;
-            top: -2px;
-            left: -2px;
-            right: -2px;
-            bottom: -2px;
-            background: linear-gradient(135deg, var(--matas-blue), var(--matas-coral), var(--matas-navy));
-            border-radius: 26px;
-            z-index: -1;
-        }
-
-        .auth-card::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            right: 0;
-            width: 120px;
-            height: 120px;
-            background: repeating-linear-gradient(
-                45deg,
-                var(--matas-light-blue),
-                var(--matas-light-blue) 10px,
-                transparent 10px,
-                transparent 20px
-            );
-            opacity: 0.2;
-            border-radius: 0 24px 0 0;
+            border: 1px solid var(--matas-light-blue);
         }
 
         .auth-card h1 {
@@ -541,44 +425,21 @@
         }
 
         .auth-button {
-            background: linear-gradient(135deg, var(--matas-blue) 0%, var(--matas-navy) 100%);
+            background: var(--matas-navy);
             color: white;
             border: none;
             padding: 16px 32px;
-            border-radius: 14px;
+            border-radius: 10px;
             font-size: 16px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .auth-button::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: repeating-linear-gradient(
-                45deg,
-                transparent,
-                transparent 6px,
-                rgba(255, 255, 255, 0.1) 6px,
-                rgba(255, 255, 255, 0.1) 12px
-            );
-            opacity: 0;
-            transition: opacity 0.3s ease;
+            transition: all 0.2s ease;
         }
 
         .auth-button:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 12px 30px rgba(30, 58, 95, 0.3);
-        }
-
-        .auth-button:hover::before {
-            opacity: 1;
+            background: var(--matas-blue);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 41, 69, 0.3);
         }
 
         .auth-button:disabled {
@@ -616,19 +477,20 @@
         }
 
         .logout-button {
-            background-color: #e74c3c;
+            background-color: var(--matas-gray);
             color: white;
             border: none;
             padding: 8px 16px;
-            border-radius: 4px;
+            border-radius: 6px;
             cursor: pointer;
             font-size: 12px;
             margin-left: 10px;
-            transition: background-color 0.2s;
+            transition: all 0.2s ease;
         }
 
         .logout-button:hover {
-            background-color: #c0392b;
+            background-color: var(--matas-navy);
+            transform: translateY(-1px);
         }
 
         .debug-info {
@@ -1021,11 +883,16 @@
         }
 
         function buildTable(headers, rows) {
-            const safeHeaders = headers.slice();
+            // Filter out URL columns from display
+            const visibleHeaders = headers.filter(h => {
+                const headerLc = String(h || '').toLowerCase();
+                return !headerLc.includes('url');
+            });
+            
             const thead = `
                 <thead>
                     <tr>
-                        ${safeHeaders.map(h => `<th>${escapeHtml(h)}</th>`).join('')}
+                        ${visibleHeaders.map(h => `<th>${escapeHtml(h)}</th>`).join('')}
                         <th>competitor_price</th>
                     </tr>
                 </thead>`;
@@ -1034,7 +901,7 @@
                 const isDirty = dirtyById.has(rowId);
                 const priceVal = dirtyById.get(rowId) ?? '';
                 const rowClass = isDirty ? ' class="row-dirty"' : '';
-                const cells = safeHeaders.map(h => `<td>${renderCell(h, r[h])}</td>`).join('');
+                const cells = visibleHeaders.map(h => `<td>${renderCell(h, r[h], r)}</td>`).join('');
                 const priceInputClass = errorById.has(rowId) ? 'price-input cell-error' : 'price-input';
                 const priceCell = `<td><input type="text" inputmode="decimal" pattern="[0-9]*" class="${priceInputClass}" data-rowid="${escapeAttr(rowId)}" value="${escapeAttr(priceVal)}" placeholder="0.00" /></td>`;
                 return `<tr${rowClass}>${cells}${priceCell}</tr>`;
@@ -1050,14 +917,36 @@
                 </div>`;
         }
 
-        function renderCell(header, value) {
+        function renderCell(header, value, rowData = null) {
             const headerLc = String(header || '').toLowerCase();
             const text = String(value ?? '');
             
-            if ((headerLc.includes('url') || headerLc.includes('image')) && text && isValidUrl(text)) {
+            // Handle Product column as clickable links using URL from row data
+            if (headerLc.includes('product') && rowData) {
+                // Look for URL field in the row data
+                const urlFields = ['URL', 'url', 'Link', 'link', 'Product URL', 'product_url'];
+                let productUrl = '';
+                
+                for (const field of urlFields) {
+                    if (rowData[field] && String(rowData[field]).trim()) {
+                        productUrl = String(rowData[field]).trim();
+                        break;
+                    }
+                }
+                
+                if (productUrl && isValidUrl(productUrl)) {
+                    const safeUrl = escapeAttr(productUrl);
+                    const safeText = escapeHtml(text);
+                    return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeText}</a>`;
+                }
+            }
+            
+            // Handle image URLs (for Image URL columns that might still exist)
+            if (headerLc.includes('image') && text && isValidUrl(text)) {
                 const safeUrl = escapeAttr(text);
                 return `<img src="${safeUrl}" class="thumb" onclick="openModal('${safeUrl}')" onerror="this.onerror=null; this.replaceWith(Object.assign(document.createElement('a'), {href: '${safeUrl}', target: '_blank', rel: 'noopener noreferrer', textContent: 'link'}));" />`;
             }
+            
             return escapeHtml(text);
         }
 
