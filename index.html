@@ -436,7 +436,7 @@
         };
 
         // App state
-        const pageSize = 100; // first 100 rows by default
+        const pageSize = 50; // Reduced for performance with large datasets
         let workbookRef = null; // original workbook
         let sheetNameRef = null;
         let headersRef = [];
@@ -448,16 +448,20 @@
         let lastCommitSha = null;
         let lastSyncTime = null;
 
-        // Debounced search
+        // Debounced search (longer delay for large datasets)
         let searchTimer = null;
         searchInput.addEventListener('input', () => {
             if (!allRows.length) return;
             clearTimeout(searchTimer);
+            
+            // Increase debounce time for large datasets
+            const debounceTime = allRows.length > 20000 ? 500 : 200;
+            
             searchTimer = setTimeout(() => {
                 applySearch(searchInput.value.trim());
                 currentPage = 1;
                 render();
-            }, 200);
+            }, debounceTime);
         });
         
         // Load button click handler
@@ -606,11 +610,26 @@
         function applySearch(query) {
             if (!query) {
                 filteredRows = allRows;
+                statusText.textContent = `Showing ${allRows.length} rows`;
                 return;
             }
+            
+            console.log('Searching in', allRows.length, 'rows for:', query);
+            const startTime = performance.now();
+            
             const q = query.toLowerCase();
             const fields = ['Product ID', 'Brand', 'Product', 'Category'];
+            
+            // For very large datasets, show loading indicator
+            if (allRows.length > 20000) {
+                statusText.textContent = 'Searching...';
+            }
+            
             filteredRows = allRows.filter(r => fields.some(f => String(r[f] ?? '').toLowerCase().includes(q)));
+            
+            const endTime = performance.now();
+            console.log(`Search completed in ${(endTime - startTime).toFixed(2)}ms. Found ${filteredRows.length} results.`);
+            statusText.textContent = `Found ${filteredRows.length} of ${allRows.length} rows (${(endTime - startTime).toFixed(0)}ms)`;
         }
 
         function render() {
@@ -948,66 +967,119 @@
                     console.log('Array buffer created, size:', arrayBuffer.byteLength);
                     
                     // Parse Excel file
-                    console.log('Parsing Excel file...');
-                    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-                    console.log('Workbook sheets:', workbook.SheetNames);
+                    console.log('Parsing large Excel file...');
+                    showStatus('githubSetupStatus', '🔄 Parsing Excel file (this may take a moment for large files)...', 'info');
                     
-                    if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
-                        throw new Error('No sheets found in the Excel file');
-                    }
-                    
-                    const firstSheetName = workbook.SheetNames[0];
-                    console.log('Using sheet:', firstSheetName);
-                    const firstSheet = workbook.Sheets[firstSheetName];
-                    
-                    if (!firstSheet) {
-                        throw new Error('First sheet is empty or invalid');
-                    }
-                    
-                    console.log('Sheet range:', firstSheet['!ref']);
-                    
-                    // Try multiple parsing approaches
-                    let rows;
-                    try {
-                        rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, blankrows: false });
-                        console.log('Method 1 - Parsed rows count:', rows.length);
-                    } catch (e) {
-                        console.log('Method 1 failed, trying alternative parsing...');
-                        rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, raw: true, defval: '' });
-                        console.log('Method 2 - Parsed rows count:', rows.length);
-                    }
-                    
-                    console.log('First few rows:', rows.slice(0, 3));
-                    
-                    if (!rows || rows.length === 0) {
-                        console.log('No data found in Excel file');
-                        headersRef = [];
-                        allRows = [];
-                        filteredRows = [];
-                        displayEmpty();
-                        return;
-                    }
+                    // Use setTimeout to allow UI update before heavy processing
+                    setTimeout(async () => {
+                        try {
+                            const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+                            console.log('Workbook sheets:', workbook.SheetNames);
+                            
+                            if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+                                throw new Error('No sheets found in the Excel file');
+                            }
+                            
+                            const firstSheetName = workbook.SheetNames[0];
+                            console.log('Using sheet:', firstSheetName);
+                            const firstSheet = workbook.Sheets[firstSheetName];
+                            
+                            if (!firstSheet) {
+                                throw new Error('First sheet is empty or invalid');
+                            }
+                            
+                            console.log('Sheet range:', firstSheet['!ref']);
+                            
+                            // Optimized parsing for large files
+                            showStatus('githubSetupStatus', '🔄 Converting Excel data to JSON...', 'info');
+                            
+                            let rows;
+                            try {
+                                // Use defval to handle empty cells efficiently
+                                rows = XLSX.utils.sheet_to_json(firstSheet, { 
+                                    header: 1, 
+                                    blankrows: false,
+                                    defval: '',
+                                    raw: false // Convert numbers to strings for consistency
+                                });
+                                console.log('Parsed rows count:', rows.length);
+                            } catch (e) {
+                                console.log('Standard parsing failed, trying alternative...');
+                                rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, raw: true, defval: '' });
+                                console.log('Alternative parsing - rows count:', rows.length);
+                            }
+                            
+                            console.log('First few rows:', rows.slice(0, 3));
+                            console.log('Last few rows:', rows.slice(-3));
+                            
+                            if (!rows || rows.length === 0) {
+                                console.log('No data found in Excel file');
+                                headersRef = [];
+                                allRows = [];
+                                filteredRows = [];
+                                displayEmpty();
+                                return;
+                            }
 
-                    const headers = rows[0].map(h => String(h ?? '').trim());
-                    const dataRows = rows.slice(1).map(r => headers.map((_, idx) => String((r[idx] ?? '')).trim()));
-                    console.log('Headers:', headers);
-                    console.log('Data rows count:', dataRows.length);
+                            showStatus('githubSetupStatus', '🔄 Processing data structure...', 'info');
+                            
+                            const headers = rows[0].map(h => String(h ?? '').trim());
+                            console.log('Headers:', headers);
+                            
+                            // Process data in chunks to avoid blocking UI
+                            const dataRows = rows.slice(1);
+                            console.log('Data rows count:', dataRows.length);
+                            
+                            showStatus('githubSetupStatus', `🔄 Converting ${dataRows.length} rows to objects...`, 'info');
+                            
+                            // Process rows in smaller chunks for better performance
+                            const processedRows = [];
+                            const chunkSize = 1000;
+                            
+                            for (let i = 0; i < dataRows.length; i += chunkSize) {
+                                const chunk = dataRows.slice(i, i + chunkSize);
+                                const processedChunk = chunk.map((row, idx) => {
+                                    const processedRow = headers.map((_, colIdx) => String((row[colIdx] ?? '')).trim());
+                                    return rowToObject(headers, processedRow, i + idx);
+                                });
+                                processedRows.push(...processedChunk);
+                                
+                                // Update progress for large files
+                                if (dataRows.length > 10000 && i % 5000 === 0) {
+                                    const progress = Math.round((i / dataRows.length) * 100);
+                                    showStatus('githubSetupStatus', `🔄 Processing rows... ${progress}%`, 'info');
+                                    // Allow UI to update
+                                    await new Promise(resolve => setTimeout(resolve, 10));
+                                }
+                            }
 
-                    headersRef = headers;
-                    allRows = dataRows.map((row, idx) => rowToObject(headersRef, row, idx));
-                    filteredRows = allRows;
-                    workbookRef = workbook;
-                    sheetNameRef = firstSheetName;
-                    dirtyById.clear();
-                    errorById.clear();
-                    currentPage = 1;
-                    syncButton.disabled = false;
-                    statusText.textContent = `Loaded ${allRows.length} rows from GitHub`;
-                    console.log('Calling render()...');
-                    render();
-                    
-                    showStatus('githubSetupStatus', '✅ Data loaded from GitHub', 'success');
-                    console.log('GitHub data loading completed successfully');
+                            headersRef = headers;
+                            allRows = processedRows;
+                            filteredRows = allRows;
+                            workbookRef = workbook;
+                            sheetNameRef = firstSheetName;
+                            dirtyById.clear();
+                            errorById.clear();
+                            currentPage = 1;
+                            syncButton.disabled = false;
+                            statusText.textContent = `Loaded ${allRows.length} rows from GitHub`;
+                            
+                            // Show performance warning for very large datasets
+                            if (allRows.length > 50000) {
+                                showStatus('githubSetupStatus', `⚠️ Large dataset (${allRows.length.toLocaleString()} rows) - some operations may be slow`, 'info');
+                            } else {
+                                showStatus('githubSetupStatus', '✅ Data loaded from GitHub', 'success');
+                            }
+                            
+                            console.log('Calling render()...');
+                            render();
+                            console.log('GitHub data loading completed successfully');
+                            
+                        } catch (innerError) {
+                            console.error('Excel parsing error:', innerError);
+                            showStatus('githubSetupStatus', `❌ Error parsing Excel: ${innerError.message}`, 'error');
+                        }
+                    }, 100); // Small delay to allow UI update
                 } else if (response.status === 404) {
                     console.log('File not found on GitHub, loading local file...');
                     // File doesn't exist yet, load local file
