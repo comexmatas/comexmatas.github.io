@@ -448,7 +448,7 @@
         const GITHUB_OWNER = 'comexmatas';
         const GITHUB_REPO = 'comexmatas.github.io';
         const SESSION_KEY = 'github_token';
-        const DEBUG = false; // Set to true for debugging
+        const DEBUG = true; // Set to true for debugging
         
         // UI elements
         const loadButton = document.getElementById('loadButton');
@@ -888,18 +888,18 @@
                 
                 try {
                     fileInfo = await getFileFromGitHub();
-                    debugLog('File retrieved from GitHub', { size: fileInfo.content.length, sha: fileInfo.sha.substring(0, 8) });
-                    
-                    // Parse the current file
-                    const currentWorkbook = XLSX.read(fileInfo.content, { 
-                        type: 'array',
-                        cellFormula: false,
-                        cellHTML: false
-                    });
+                debugLog('File retrieved from GitHub', { size: fileInfo.content.length, sha: fileInfo.sha.substring(0, 8) });
+                
+                // Parse the current file
+                const currentWorkbook = XLSX.read(fileInfo.content, { 
+                    type: 'array',
+                    cellFormula: false,
+                    cellHTML: false
+                });
                     
                     debugLog('Workbook parsed', { sheetNames: currentWorkbook.SheetNames });
-                    
-                    const currentSheet = currentWorkbook.Sheets[currentWorkbook.SheetNames[0]];
+                
+                const currentSheet = currentWorkbook.Sheets[currentWorkbook.SheetNames[0]];
                     currentRows = XLSX.utils.sheet_to_json(currentSheet, { header: 1, blankrows: false });
                     debugLog('Current file parsed', { 
                         rows: currentRows.length,
@@ -924,10 +924,16 @@
                 
                 // Safety check: ensure we have valid data structure
                 if (!Array.isArray(updatedRows)) {
+                    debugLog('updatedRows is not an array', { type: typeof updatedRows, value: updatedRows });
                     throw new Error('Data integrity check failed: updatedRows is not an array');
                 }
                 
                 if (updatedRows.length === 0) {
+                    debugLog('No rows returned from updateRowsWithChanges', { 
+                        originalRowsLength: currentRows ? currentRows.length : 'N/A',
+                        originalRowsType: typeof currentRows,
+                        dirtyCount: dirtyById.size
+                    });
                     throw new Error('Data integrity check failed: No rows returned from updateRowsWithChanges');
                 }
                 
@@ -1040,27 +1046,47 @@
         }
         
         function updateRowsWithChanges(rows, changes) {
+            debugLog('updateRowsWithChanges called with', { 
+                rowsType: typeof rows, 
+                rowsIsArray: Array.isArray(rows),
+                rowsLength: rows ? rows.length : 'N/A',
+                changesSize: changes ? changes.size : 'N/A'
+            });
+            
             if (!rows || rows.length === 0) {
-                debugLog('updateRowsWithChanges: No input rows');
-                return rows || [];
+                debugLog('updateRowsWithChanges: No input rows, returning empty structure');
+                // Return at least headers if we have them from local data
+                if (headersRef && headersRef.length > 0) {
+                    return [headersRef];
+                }
+                return [[]]; // Return at least one empty row to avoid empty array
             }
             
             if (!Array.isArray(rows)) {
-                debugLog('updateRowsWithChanges: Input is not an array', { type: typeof rows });
-                return [];
+                debugLog('updateRowsWithChanges: Input is not an array', { type: typeof rows, value: rows });
+                // Try to convert to array or return minimal structure
+                if (headersRef && headersRef.length > 0) {
+                    return [headersRef];
+                }
+                return [[]];
             }
             
             if (rows.length < 1) {
                 debugLog('updateRowsWithChanges: Input has no rows');
-                return rows;
+                return headersRef && headersRef.length > 0 ? [headersRef] : [[]];
             }
             
             const headers = rows[0];
             const dataRows = rows.slice(1);
             
             if (!Array.isArray(headers)) {
-                debugLog('updateRowsWithChanges: Headers row is not an array', { headers });
-                // Return original rows if headers are problematic
+                debugLog('updateRowsWithChanges: Headers row is not an array', { headers, type: typeof headers });
+                // Try to use local headers as fallback
+                if (headersRef && headersRef.length > 0) {
+                    debugLog('Using headersRef as fallback');
+                    return [headersRef, ...dataRows];
+                }
+                // Last resort: return original rows
                 return rows;
             }
             
@@ -1106,13 +1132,23 @@
                 return extendedRow;
             });
             
+            const result = [headers, ...updatedDataRows];
+            
             debugLog('updateRowsWithChanges output', { 
                 headersCount: headers.length, 
                 updatedRowsCount: updatedDataRows.length,
-                sampleUpdatedRow: updatedDataRows.length > 0 ? updatedDataRows[0].slice(0, 5) : []
+                sampleUpdatedRow: updatedDataRows.length > 0 ? updatedDataRows[0].slice(0, 5) : [],
+                resultLength: result.length,
+                resultIsArray: Array.isArray(result)
             });
             
-            return [headers, ...updatedDataRows];
+            // Final safeguard
+            if (!Array.isArray(result) || result.length === 0) {
+                debugLog('Final safeguard triggered, returning minimal structure');
+                return headersRef && headersRef.length > 0 ? [headersRef] : [['Product ID', 'Brand', 'Product', 'Category', 'competitor_price']];
+            }
+            
+            return result;
         }
 
         function displayEmpty() {
