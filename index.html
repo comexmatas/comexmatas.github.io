@@ -448,7 +448,7 @@
         const GITHUB_OWNER = 'comexmatas';
         const GITHUB_REPO = 'comexmatas.github.io';
         const SESSION_KEY = 'github_token';
-        const DEBUG = false; // Set to true for debugging
+        const DEBUG = true; // Set to true for debugging
         
         // UI elements
         const loadButton = document.getElementById('loadButton');
@@ -543,6 +543,20 @@
                     alert('No changes to sync.');
                     return;
                 }
+                
+                // Show preview of changes
+                const changesList = Array.from(dirtyById.entries())
+                    .map(([id, price]) => `• ${id}: ${price}`)
+                    .slice(0, 10)
+                    .join('\n');
+                const moreCount = dirtyById.size > 10 ? `\n... and ${dirtyById.size - 10} more` : '';
+                
+                const confirmMessage = `Ready to sync ${dirtyById.size} price changes:\n\n${changesList}${moreCount}\n\nThis will update the GitHub file. Continue?`;
+                
+                if (!confirm(confirmMessage)) {
+                    return;
+                }
+                
                 try {
                     await attemptSync();
                 } catch (e) {
@@ -888,10 +902,25 @@
                 const updatedRows = updateRowsWithChanges(currentRows, dirtyById);
                 debugLog('Rows updated with changes', { originalRows: currentRows.length, updatedRows: updatedRows.length });
                 
+                // Safety check: ensure we haven't lost data
+                if (updatedRows.length < currentRows.length) {
+                    throw new Error(`Data integrity check failed: Original had ${currentRows.length} rows, updated has ${updatedRows.length} rows`);
+                }
+                
+                // Safety check: ensure headers are still present
+                if (!updatedRows[0] || updatedRows[0].length === 0) {
+                    throw new Error('Data integrity check failed: Headers are missing');
+                }
+                
+                // Safety check: ensure we have data rows
+                if (updatedRows.length < 2 && currentRows.length >= 2) {
+                    throw new Error('Data integrity check failed: Data rows are missing');
+                }
+                
                 // Create new workbook with updated data
                 const newWorkbook = XLSX.utils.book_new();
                 const newSheet = XLSX.utils.aoa_to_sheet(updatedRows);
-                XLSX.utils.book_append_sheet(newWorkbook, newSheet, sheetNameRef);
+                XLSX.utils.book_append_sheet(newWorkbook, newSheet, sheetNameRef || 'Sheet1');
                 
                 // Convert workbook to binary
                 const wbBinary = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
@@ -972,6 +1001,14 @@
             const headers = rows[0];
             const dataRows = rows.slice(1);
             
+            debugLog('updateRowsWithChanges input', { 
+                headersCount: headers.length, 
+                dataRowsCount: dataRows.length,
+                changesCount: changes.size,
+                sampleHeader: headers.slice(0, 5),
+                sampleDataRow: dataRows.length > 0 ? dataRows[0].slice(0, 5) : []
+            });
+            
             // Find or add competitor_price column
             let priceColumnIndex = headers.findIndex(h => 
                 String(h || '').toLowerCase().includes('competitor_price')
@@ -980,11 +1017,15 @@
             if (priceColumnIndex === -1) {
                 headers.push('competitor_price');
                 priceColumnIndex = headers.length - 1;
+                debugLog('Added competitor_price column at index', priceColumnIndex);
+            } else {
+                debugLog('Found existing competitor_price column at index', priceColumnIndex);
             }
             
             // Update data rows
             const updatedDataRows = dataRows.map((row, idx) => {
-                const rowObj = rowToObject(headersRef, row, idx);
+                // Use the current file's headers to create row object, not headersRef
+                const rowObj = rowToObject(headers, row, idx);
                 const rowId = rowObj.__id;
                 
                 // Extend row to match headers length
@@ -995,10 +1036,17 @@
                 
                 // Apply changes if any
                 if (changes.has(rowId)) {
+                    debugLog('Applying change to row', { rowId, oldValue: extendedRow[priceColumnIndex], newValue: changes.get(rowId) });
                     extendedRow[priceColumnIndex] = changes.get(rowId);
                 }
                 
                 return extendedRow;
+            });
+            
+            debugLog('updateRowsWithChanges output', { 
+                headersCount: headers.length, 
+                updatedRowsCount: updatedDataRows.length,
+                sampleUpdatedRow: updatedDataRows.length > 0 ? updatedDataRows[0].slice(0, 5) : []
             });
             
             return [headers, ...updatedDataRows];
