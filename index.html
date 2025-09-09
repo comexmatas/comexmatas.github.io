@@ -1459,11 +1459,11 @@
         }
 
         function buildTable(headers, rows) {
-            // Define mobile-friendly column order: Image URL, Product, Competitor Price, Brand, Category
+            // Define mobile-friendly column order: Image URL, Product, Price, Brand, Category
             const preferredOrder = [
                 'Image URL', 'image_url', 'imageurl', 'image',
                 'Product', 'product', 'Product Name', 'product_name', 'productname',
-                'competitor_price', 'Competitor Price', 'competitorprice', 'price',
+                'Price',
                 'Brand', 'brand',
                 'Category', 'category'
             ];
@@ -1518,13 +1518,12 @@
                 // Only mark as dirty if it's a user session change
                 const isDirty = localChanges.has(rowId);
                 // Use user changed value if exists, otherwise use original CSV value
-                const priceVal = localChanges.has(rowId) ? dirtyById.get(rowId) : (r['competitor_price'] || '');
+                const priceVal = localChanges.has(rowId) ? dirtyById.get(rowId) : (r['Price'] || '');
                 const rowClass = isDirty ? ' class="row-dirty"' : '';
                 
                 const cells = finalHeaders.map(h => {
-                    const headerLc = String(h || '').toLowerCase();
-                    if (headerLc.includes('competitor_price')) {
-                        // Render competitor_price as editable input
+                    if (h === 'Price') {
+                        // Render Price as editable input
                         const priceInputClass = errorById.has(rowId) ? 'price-input cell-error' : 'price-input';
                         return `<td><input type="text" inputmode="decimal" pattern="[0-9]*" class="${priceInputClass}" data-rowid="${escapeAttr(rowId)}" value="${escapeAttr(priceVal)}" placeholder="0.00" /></td>`;
                     } else {
@@ -1790,7 +1789,7 @@
                     
                     // Apply local price changes
                     if (dirtyById.has(itemId)) {
-                        updatedItem.competitor_price = dirtyById.get(itemId);
+                        updatedItem.Price = dirtyById.get(itemId);
                     }
                     
                     // Add sync timestamp (but filter it out from display)
@@ -2164,7 +2163,7 @@
                         Object.entries(draftData.changes).forEach(([key, value]) => {
                             // Check if this is actually different from the original CSV value
                             const originalRow = allRows.find(row => row.__id === key);
-                            const originalPrice = originalRow ? (originalRow['competitor_price'] || '') : '';
+                            const originalPrice = originalRow ? (originalRow['Price'] || '') : '';
                             
                             // Only restore if the draft value is different from original CSV
                             if (value !== originalPrice) {
