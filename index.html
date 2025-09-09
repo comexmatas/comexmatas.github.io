@@ -364,7 +364,7 @@
             background-color: #c0392b;
         }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 </head>
 <body>
     <!-- Authentication Screen -->
@@ -528,7 +528,7 @@
             }
         }
 
-        // XLSX loading and parsing function
+        // Excel loading and parsing function using ExcelJS
         async function loadXLSX(filePath) {
             try {
                 dataContainer.innerHTML = '<div class="loading">Loading data...</div>';
@@ -540,12 +540,31 @@
                 }
 
                 const arrayBuffer = await response.arrayBuffer();
-                const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+                const workbook = new ExcelJS.Workbook();
+                await workbook.xlsx.load(arrayBuffer);
 
-                const firstSheetName = workbook.SheetNames[0];
-                const firstSheet = workbook.Sheets[firstSheetName];
+                const firstWorksheet = workbook.worksheets[0];
+                if (!firstWorksheet) {
+                    headersRef = [];
+                    allRows = [];
+                    filteredRows = [];
+                    displayEmpty();
+                    return;
+                }
 
-                const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, blankrows: false });
+                const rows = [];
+                firstWorksheet.eachRow((row, rowNumber) => {
+                    const rowValues = [];
+                    row.eachCell((cell, colNumber) => {
+                        rowValues[colNumber - 1] = String(cell.value ?? '').trim();
+                    });
+                    // Fill empty cells
+                    while (rowValues.length < firstWorksheet.columnCount) {
+                        rowValues.push('');
+                    }
+                    rows.push(rowValues);
+                });
+
                 if (!rows || rows.length === 0) {
                     headersRef = [];
                     allRows = [];
@@ -555,21 +574,21 @@
                 }
 
                 const headers = rows[0].map(h => String(h ?? '').trim());
-                const dataRows = rows.slice(1).map(r => headers.map((_, idx) => String((r[idx] ?? '')).trim()));
+                const dataRows = rows.slice(1);
 
                 headersRef = headers;
                 allRows = dataRows.map((row, idx) => rowToObject(headersRef, row, idx));
                 filteredRows = allRows;
                 workbookRef = workbook;
-                sheetNameRef = firstSheetName;
+                sheetNameRef = firstWorksheet.name;
                 dirtyById.clear();
                 errorById.clear();
                 currentPage = 1;
-                syncButton.disabled = false; // will attempt FS API later
+                syncButton.disabled = false;
                 statusText.textContent = `Loaded ${allRows.length} rows`;
                 render();
             } catch (error) {
-                console.error('Error loading XLSX:', error);
+                console.error('Error loading Excel:', error);
                 errorMessage.innerHTML = `<div class="error">Error loading file: ${error.message}</div>`;
                 dataContainer.innerHTML = '<div class="empty-state">Failed to load data.</div>';
             }
@@ -758,73 +777,76 @@
                 const fileInfo = await getFileFromGitHub();
                 
                 // Step 2: Read and parse the current Excel file
-                console.log('Parsing Excel file with XLSX...');
+                console.log('Parsing Excel file with ExcelJS...');
                 let currentWorkbook;
                 let currentRows;
                 
                 try {
-                    // Try parsing with different options
-                    console.log('Attempting to parse with type: array, length:', fileInfo.content.length);
-                    currentWorkbook = XLSX.read(fileInfo.content, { 
-                        type: 'array',
-                        cellFormula: false,
-                        cellHTML: false
-                    });
-                    console.log('XLSX.read completed successfully');
-                } catch (xlsxError) {
-                    console.error('XLSX parsing error:', xlsxError);
-                    console.log('Trying alternative parsing method...');
-                    
-                    try {
-                        // Try with buffer type as fallback
-                        const buffer = fileInfo.content.buffer || fileInfo.content;
-                        currentWorkbook = XLSX.read(buffer, { 
-                            type: 'buffer',
-                            cellFormula: false,
-                            cellHTML: false
-                        });
-                        console.log('Alternative parsing method succeeded');
-                    } catch (altError) {
-                        console.error('Alternative parsing also failed:', altError);
-                        throw new Error(`Failed to parse Excel file: ${xlsxError.message}. Alternative method: ${altError.message}`);
-                    }
+                    console.log('Attempting to parse with ExcelJS, buffer length:', fileInfo.content.length);
+                    currentWorkbook = new ExcelJS.Workbook();
+                    await currentWorkbook.xlsx.load(fileInfo.content.buffer || fileInfo.content);
+                    console.log('ExcelJS parsing completed successfully');
+                } catch (excelError) {
+                    console.error('ExcelJS parsing error:', excelError);
+                    throw new Error(`Failed to parse Excel file: ${excelError.message}`);
                 }
                 
-                if (!currentWorkbook || !currentWorkbook.SheetNames || currentWorkbook.SheetNames.length === 0) {
+                if (!currentWorkbook || !currentWorkbook.worksheets || currentWorkbook.worksheets.length === 0) {
                     console.error('Invalid workbook structure:', currentWorkbook);
-                    throw new Error('Invalid Excel file: No sheets found');
+                    throw new Error('Invalid Excel file: No worksheets found');
                 }
                 
-                console.log('Workbook sheet names:', currentWorkbook.SheetNames);
-                const currentSheet = currentWorkbook.Sheets[currentWorkbook.SheetNames[0]];
+                const worksheetNames = currentWorkbook.worksheets.map(ws => ws.name);
+                console.log('Workbook worksheet names:', worksheetNames);
+                const currentWorksheet = currentWorkbook.worksheets[0];
                 
-                if (!currentSheet) {
-                    console.error('Sheet not found. Available sheets:', currentWorkbook.SheetNames);
-                    throw new Error(`Sheet "${currentWorkbook.SheetNames[0]}" not found in workbook`);
+                if (!currentWorksheet) {
+                    console.error('Worksheet not found. Available worksheets:', worksheetNames);
+                    throw new Error(`First worksheet not found in workbook`);
                 }
                 
                 try {
-                    currentRows = XLSX.utils.sheet_to_json(currentSheet, { header: 1, blankrows: false });
+                    currentRows = [];
+                    currentWorksheet.eachRow((row, rowNumber) => {
+                        const rowValues = [];
+                        row.eachCell((cell, colNumber) => {
+                            rowValues[colNumber - 1] = String(cell.value ?? '').trim();
+                        });
+                        // Fill empty cells to maintain consistent column count
+                        while (rowValues.length < currentWorksheet.columnCount) {
+                            rowValues.push('');
+                        }
+                        currentRows.push(rowValues);
+                    });
+                    
                     console.log('Parsed rows from GitHub file:', currentRows.length);
                     
                     if (currentRows.length > 0) {
                         console.log('First few rows:', currentRows.slice(0, 3));
                     }
-                } catch (jsonError) {
-                    console.error('Error converting sheet to JSON:', jsonError);
-                    throw new Error(`Failed to convert Excel data to JSON: ${jsonError.message}`);
+                } catch (rowError) {
+                    console.error('Error processing worksheet rows:', rowError);
+                    throw new Error(`Failed to process Excel data: ${rowError.message}`);
                 }
                 
                 // Step 3: Update the rows with our changes
                 const updatedRows = updateRowsWithChanges(currentRows);
                 
                 // Step 4: Create new workbook with updated data
-                const newWorkbook = XLSX.utils.book_new();
-                const newSheet = XLSX.utils.aoa_to_sheet(updatedRows);
-                XLSX.utils.book_append_sheet(newWorkbook, newSheet, currentWorkbook.SheetNames[0]);
+                const newWorkbook = new ExcelJS.Workbook();
+                const newWorksheet = newWorkbook.addWorksheet(currentWorksheet.name);
+                
+                // Add rows to the new worksheet
+                updatedRows.forEach((row, index) => {
+                    const excelRow = newWorksheet.addRow(row);
+                    if (index === 0) {
+                        // Make header row bold
+                        excelRow.font = { bold: true };
+                    }
+                });
                 
                 // Step 5: Convert to base64 for GitHub API
-                const buffer = XLSX.write(newWorkbook, { type: 'array', bookType: 'xlsx' });
+                const buffer = await newWorkbook.xlsx.writeBuffer();
                 const base64Content = arrayBufferToBase64(buffer);
                 
                 // Step 6: Commit the changes back to GitHub
@@ -1004,24 +1026,34 @@
             return btoa(binary);
         }
 
-        function buildUpdatedWorkbook() {
+        async function buildUpdatedWorkbook() {
             const outHeaders = headersRef.includes('competitor_price') ? headersRef.slice() : headersRef.concat(['competitor_price']);
             const data = allRows.map(r => {
                 const price = dirtyById.get(r.__id);
-                const obj = {};
+                const row = [];
                 outHeaders.forEach(h => {
                     if (h === 'competitor_price') {
-                        obj[h] = price ?? '';
+                        row.push(price ?? '');
                     } else {
-                        obj[h] = r[h] ?? '';
+                        row.push(r[h] ?? '');
                     }
                 });
-                return obj;
+                return row;
             });
-            const ws = XLSX.utils.json_to_sheet(data, { header: outHeaders });
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, sheetNameRef || 'Products');
-            return wb;
+            
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet(sheetNameRef || 'Products');
+            
+            // Add headers
+            const headerRow = worksheet.addRow(outHeaders);
+            headerRow.font = { bold: true };
+            
+            // Add data rows
+            data.forEach(row => {
+                worksheet.addRow(row);
+            });
+            
+            return workbook;
         }
 
         
