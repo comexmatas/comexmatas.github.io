@@ -759,9 +759,39 @@
                 
                 // Step 2: Read and parse the current Excel file
                 console.log('Parsing Excel file with XLSX...');
-                const currentWorkbook = XLSX.read(fileInfo.content, { type: 'array' });
+                let currentWorkbook;
+                let currentRows;
+                
+                try {
+                    // Try parsing with different options
+                    console.log('Attempting to parse with type: array, length:', fileInfo.content.length);
+                    currentWorkbook = XLSX.read(fileInfo.content, { 
+                        type: 'array',
+                        cellFormula: false,
+                        cellHTML: false
+                    });
+                    console.log('XLSX.read completed successfully');
+                } catch (xlsxError) {
+                    console.error('XLSX parsing error:', xlsxError);
+                    console.log('Trying alternative parsing method...');
+                    
+                    try {
+                        // Try with buffer type as fallback
+                        const buffer = fileInfo.content.buffer || fileInfo.content;
+                        currentWorkbook = XLSX.read(buffer, { 
+                            type: 'buffer',
+                            cellFormula: false,
+                            cellHTML: false
+                        });
+                        console.log('Alternative parsing method succeeded');
+                    } catch (altError) {
+                        console.error('Alternative parsing also failed:', altError);
+                        throw new Error(`Failed to parse Excel file: ${xlsxError.message}. Alternative method: ${altError.message}`);
+                    }
+                }
                 
                 if (!currentWorkbook || !currentWorkbook.SheetNames || currentWorkbook.SheetNames.length === 0) {
+                    console.error('Invalid workbook structure:', currentWorkbook);
                     throw new Error('Invalid Excel file: No sheets found');
                 }
                 
@@ -769,11 +799,21 @@
                 const currentSheet = currentWorkbook.Sheets[currentWorkbook.SheetNames[0]];
                 
                 if (!currentSheet) {
+                    console.error('Sheet not found. Available sheets:', currentWorkbook.SheetNames);
                     throw new Error(`Sheet "${currentWorkbook.SheetNames[0]}" not found in workbook`);
                 }
                 
-                const currentRows = XLSX.utils.sheet_to_json(currentSheet, { header: 1, blankrows: false });
-                console.log('Parsed rows from GitHub file:', currentRows.length);
+                try {
+                    currentRows = XLSX.utils.sheet_to_json(currentSheet, { header: 1, blankrows: false });
+                    console.log('Parsed rows from GitHub file:', currentRows.length);
+                    
+                    if (currentRows.length > 0) {
+                        console.log('First few rows:', currentRows.slice(0, 3));
+                    }
+                } catch (jsonError) {
+                    console.error('Error converting sheet to JSON:', jsonError);
+                    throw new Error(`Failed to convert Excel data to JSON: ${jsonError.message}`);
+                }
                 
                 // Step 3: Update the rows with our changes
                 const updatedRows = updateRowsWithChanges(currentRows);
@@ -807,10 +847,11 @@
         async function getFileFromGitHub() {
             console.log(`Fetching file from GitHub: ${DEFAULT_FILE}`);
             
-            const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
+            const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
                 headers: {
                     'Authorization': `token ${authToken}`,
-                    'Accept': 'application/vnd.github.v3+json'
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Content-Type': 'application/json'
                 }
             });
 
@@ -931,7 +972,7 @@
         async function commitFileToGitHub(base64Content, sha) {
             const commitMessage = `Update competitor prices for ${dirtyById.size} products`;
             
-            const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
+            const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
                 method: 'PUT',
                 headers: {
                     'Authorization': `token ${authToken}`,
