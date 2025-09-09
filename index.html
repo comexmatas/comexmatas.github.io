@@ -883,17 +883,16 @@
         }
 
         function buildTable(headers, rows) {
-            // Filter out URL columns from display
+            // Filter out product URL columns from display, but keep Image URL columns
             const visibleHeaders = headers.filter(h => {
                 const headerLc = String(h || '').toLowerCase();
-                return !headerLc.includes('url');
+                return !(headerLc.includes('url') && !headerLc.includes('image'));
             });
             
             const thead = `
                 <thead>
                     <tr>
                         ${visibleHeaders.map(h => `<th>${escapeHtml(h)}</th>`).join('')}
-                        <th>competitor_price</th>
                     </tr>
                 </thead>`;
             const tbodyRows = rows.map(r => {
@@ -901,10 +900,20 @@
                 const isDirty = dirtyById.has(rowId);
                 const priceVal = dirtyById.get(rowId) ?? '';
                 const rowClass = isDirty ? ' class="row-dirty"' : '';
-                const cells = visibleHeaders.map(h => `<td>${renderCell(h, r[h], r)}</td>`).join('');
-                const priceInputClass = errorById.has(rowId) ? 'price-input cell-error' : 'price-input';
-                const priceCell = `<td><input type="text" inputmode="decimal" pattern="[0-9]*" class="${priceInputClass}" data-rowid="${escapeAttr(rowId)}" value="${escapeAttr(priceVal)}" placeholder="0.00" /></td>`;
-                return `<tr${rowClass}>${cells}${priceCell}</tr>`;
+                
+                const cells = visibleHeaders.map(h => {
+                    const headerLc = String(h || '').toLowerCase();
+                    if (headerLc.includes('competitor_price')) {
+                        // Render competitor_price as editable input
+                        const priceInputClass = errorById.has(rowId) ? 'price-input cell-error' : 'price-input';
+                        return `<td><input type="text" inputmode="decimal" pattern="[0-9]*" class="${priceInputClass}" data-rowid="${escapeAttr(rowId)}" value="${escapeAttr(priceVal)}" placeholder="0.00" /></td>`;
+                    } else {
+                        // Render other cells normally
+                        return `<td>${renderCell(h, r[h], r)}</td>`;
+                    }
+                }).join('');
+                
+                return `<tr${rowClass}>${cells}</tr>`;
             }).join('');
             return `
                 <div class="table-container">
