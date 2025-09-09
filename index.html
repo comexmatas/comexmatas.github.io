@@ -959,7 +959,7 @@
             // Handle image URLs (for Image URL columns that might still exist)
             if (headerLc.includes('image') && text && isValidUrl(text)) {
                 const safeUrl = escapeAttr(text);
-                return `<img src="${safeUrl}" class="thumb" onclick="openModal('${safeUrl}')" onerror="this.onerror=null; this.replaceWith(Object.assign(document.createElement('a'), {href: '${safeUrl}', target: '_blank', rel: 'noopener noreferrer', textContent: 'link'}));" />`;
+                return `<img src="${safeUrl}" class="thumb" onclick="openModal('${safeUrl}')" onerror="this.style.display='none'; this.onerror=null;" />`;
             }
             
             return escapeHtml(text);
