@@ -1024,7 +1024,7 @@
     <div class="controls">
         <div class="controls-row">
             <input id="searchInput" class="search-input" type="search" placeholder="Search Product, Brand, Category" inputmode="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
-            <button id="loadButton" class="load-button">Load Data</button>
+            <button id="loadButton" class="load-button">Load from GitHub</button>
             <button id="syncButton" class="sync-button" disabled>Sync</button>
         </div>
         <div class="status-bar">
@@ -1038,7 +1038,7 @@
     <div id="errorMessage"></div>
     <div id="dataContainer">
         <div class="empty-state">
-            Click "Load Data" to display the contents.
+            Click "Load from GitHub" to display the contents.
         </div>
     </div>
 
@@ -1056,7 +1056,7 @@
         const GITHUB_OWNER = 'comexmatas';
         const GITHUB_REPO = 'comexmatas.github.io';
         const SESSION_KEY = 'github_token';
-        const DEBUG = false; // Set to true for debugging
+        const DEBUG = true; // Set to true for debugging
         
         // UI elements
         const loadButton = document.getElementById('loadButton');
@@ -1338,29 +1338,47 @@
 
         function loadData(filePath) {
             if (filePath.toLowerCase().endsWith('.csv')) {
-                loadCSV(filePath);
+                loadCSVFromGitHub(filePath);
             } else {
                 errorMessage.innerHTML = `<div class="error">Unsupported file type. Please select a .csv file.</div>`;
             }
         }
 
-        async function loadCSV(filePath) {
+        async function loadCSVFromGitHub(filePath) {
             try {
                 dataContainer.innerHTML = '<div class="loading">Loading data...</div>';
                 errorMessage.innerHTML = '';
-                debugLog('Starting to load CSV file', filePath);
+                debugLog('Starting to load CSV file from GitHub', filePath);
 
-                const response = await fetch(filePath);
-                if (!response.ok) {
-                    throw new Error(`Failed to load file: ${response.status} ${response.statusText}`);
+                if (!authToken) {
+                    throw new Error('Authentication required. Please login first.');
                 }
 
-                const csvText = await response.text();
-                debugLog('File loaded, size:', csvText.length);
+                // Load from GitHub API
+                const response = await fetch(
+                    `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${filePath}`,
+                    {
+                        headers: {
+                            'Authorization': `token ${authToken}`,
+                            'Accept': 'application/vnd.github.v3+json'
+                        }
+                    }
+                );
+
+                if (!response.ok) {
+                    throw new Error(`Failed to load file from GitHub: ${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                lastCommitSha = data.sha;
                 
-                // Parse CSV using Papa Parse
+                // Decode base64 content
+                const csvText = atob(data.content);
+                debugLog('File loaded from GitHub, size:', csvText.length);
+                
+                // Parse CSV using Papa Parse with headers (like in attemptSync)
                 const parsed = Papa.parse(csvText, {
-                    header: false,
+                    header: true,
                     dynamicTyping: false,
                     skipEmptyLines: true
                 });
@@ -1375,23 +1393,41 @@
                     return;
                 }
 
-                const headers = parsed.data[0].map(h => String(h ?? '').trim()).filter(h => h);
-                const dataRows = parsed.data.slice(1).map(r => headers.map((_, idx) => String((r[idx] ?? '')).trim()));
-
+                // Get headers from Papa Parse
+                const headers = Object.keys(parsed.data[0]);
                 debugLog('Headers:', headers);
-                debugLog('Data rows count:', dataRows.length);
+
+                // Convert parsed data to our format
+                allRows = parsed.data.map((row, idx) => {
+                    const obj = {};
+                    Object.keys(row).forEach(key => {
+                        obj[key] = String(row[key] || '');
+                    });
+                    obj.__rowIndex = idx;
+                    
+                    // Try multiple ways to find product ID
+                    const productIdFields = ['product_id', 'Product ID', 'productid', 'id', 'ID'];
+                    let productId = '';
+                    
+                    for (const field of productIdFields) {
+                        if (obj[field] && String(obj[field]).trim()) {
+                            productId = String(obj[field]).trim();
+                            break;
+                        }
+                    }
+                    
+                    obj.__id = productId || `row_${idx}`;
+                    return obj;
+                }).filter(item => item.__id);
+
+                debugLog('Data rows count:', allRows.length);
 
                 headersRef = headers;
-                allRows = dataRows.map((row, idx) => rowToObject(headersRef, row, idx));
                 filteredRows = allRows;
                 dirtyById.clear();
                 errorById.clear();
                 localChanges.clear();
                 
-                // Don't add existing prices to dirtyById - they should come from CSV data directly
-                // Only user session changes should go into dirtyById and localChanges
-                
-                // Debug: Log initial state
                 debugLog('After CSV load - before draft restore', {
                     dirtyByIdSize: dirtyById.size,
                     localChangesSize: localChanges.size
