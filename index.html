@@ -1167,6 +1167,10 @@
             });
 
             addMobileButtonHandler(syncButton, async () => {
+                if (allRows.length === 0) {
+                    alert('No data loaded. Please "Load from GitHub" first before syncing.');
+                    return;
+                }
                 if (errorById.size > 0) {
                     alert('Please fix validation errors before syncing.');
                     return;
