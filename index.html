@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Normal Prices Registry</title>
     <style>
         :root {
@@ -309,23 +309,25 @@
             border-radius: 4px;
         }
         
-        .modal-close {
-            position: absolute;
-            top: 10px;
-            right: 15px;
-            font-size: 28px;
-            font-weight: bold;
-            color: #aaa;
-            cursor: pointer;
-            background: none;
-            border: none;
-            padding: 0;
-            width: 30px;
-            height: 30px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
+            .modal-close {
+                position: absolute;
+                top: 10px;
+                right: 15px;
+                font-size: 28px;
+                font-weight: bold;
+                color: #aaa;
+                cursor: pointer;
+                background: none;
+                border: none;
+                padding: 0;
+                width: 44px;
+                height: 44px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 50%;
+                transition: all 0.2s ease;
+            }
         
         .modal-close:hover {
             color: #000;
@@ -673,11 +675,13 @@
                 top: 5px;
                 right: 10px;
                 font-size: 24px;
-                width: 35px;
-                height: 35px;
+                width: 48px;
+                height: 48px;
                 background: rgba(0, 0, 0, 0.1);
                 border-radius: 50%;
                 color: #666;
+                min-height: 48px;
+                min-width: 48px;
             }
 
             .modal-close:hover {
@@ -896,12 +900,14 @@
             transform: translateX(-50%) !important;
         }
 
-        /* iOS Safari specific fixes */
-        @supports (-webkit-touch-callout: none) {
-            .search-input, .token-input, .price-input {
-                font-size: 16px; /* Prevent zoom on iOS */
-                transform: translateZ(0); /* Force hardware acceleration */
-            }
+            /* iOS Safari specific fixes */
+            @supports (-webkit-touch-callout: none) {
+                .search-input, .token-input, .price-input {
+                    font-size: 16px !important; /* Prevent zoom on iOS */
+                    transform: translateZ(0); /* Force hardware acceleration */
+                    -webkit-user-select: text;
+                    user-select: text;
+                }
 
             .table-container {
                 -webkit-overflow-scrolling: touch;
@@ -999,7 +1005,7 @@
     <!-- Image Preview Modal -->
     <div id="imageModal" class="modal">
         <div class="modal-content">
-            <button class="modal-close" onclick="closeModal()">&times;</button>
+            <button id="modalCloseButton" class="modal-close">&times;</button>
             <img id="modalImage" class="modal-image" src="" alt="Preview">
         </div>
     </div>
@@ -1055,6 +1061,12 @@
             setupAuthHandlers();
             setupAppHandlers();
             
+            // Setup modal close button with mobile optimization
+            const modalCloseButton = document.getElementById('modalCloseButton');
+            if (modalCloseButton) {
+                addMobileButtonHandler(modalCloseButton, closeModal);
+            }
+            
             // Load last sync time
             const savedSyncTime = localStorage.getItem('lastSyncTime');
             if (savedSyncTime) {
@@ -1072,6 +1084,7 @@
         function setupAuthHandlers() {
             const authForm = document.getElementById('authForm');
             const logoutButton = document.getElementById('logoutButton');
+            const authButton = document.getElementById('authButton');
 
             authForm.addEventListener('submit', async function(e) {
                 e.preventDefault();
@@ -1081,7 +1094,16 @@
                 }
             });
 
-            logoutButton.addEventListener('click', function() {
+            // Use mobile-optimized handler for auth button
+            addMobileButtonHandler(authButton, async function(e) {
+                e.preventDefault();
+                const token = document.getElementById('tokenInput').value.trim();
+                if (token) {
+                    await validateToken(token, false);
+                }
+            });
+
+            addMobileButtonHandler(logoutButton, function() {
                 logout();
             });
         }
@@ -1099,11 +1121,12 @@
                 }, 200);
             });
             
-            loadButton.addEventListener('click', function() {
+            // Enhanced button event handling for mobile
+            addMobileButtonHandler(loadButton, function() {
                 loadData(DEFAULT_FILE);
             });
 
-            syncButton.addEventListener('click', async () => {
+            addMobileButtonHandler(syncButton, async () => {
                 if (errorById.size > 0) {
                     alert('Please fix validation errors before syncing.');
                     return;
@@ -1132,6 +1155,81 @@
                     console.error('Sync failed:', e);
                     alert(`Sync failed: ${e.message}`);
                 }
+            });
+        }
+
+        // Enhanced button handler that works better on mobile devices
+        function addMobileButtonHandler(button, handler) {
+            if (!button) return;
+            
+            // Mark button as having mobile handler
+            button.setAttribute('data-mobile-handler', 'true');
+            
+            let touchStartTime = 0;
+            let touchHandled = false;
+            let lastExecuteTime = 0;
+            
+            // Touch events for mobile (faster response)
+            button.addEventListener('touchstart', function(e) {
+                touchStartTime = Date.now();
+                touchHandled = false;
+                
+                // Prevent default to avoid ghost clicks
+                e.preventDefault();
+                
+                // Add visual feedback
+                button.style.transform = 'scale(0.98)';
+                button.style.transition = 'transform 0.1s ease';
+            });
+            
+            button.addEventListener('touchend', function(e) {
+                const touchDuration = Date.now() - touchStartTime;
+                const timeSinceLastExecute = Date.now() - lastExecuteTime;
+                
+                // Reset visual feedback
+                setTimeout(() => {
+                    button.style.transform = '';
+                    button.style.transition = '';
+                }, 100);
+                
+                // Only trigger if it was a quick tap (not a long press or scroll) and not too soon after last execution
+                if (touchDuration < 500 && !touchHandled && !button.disabled && timeSinceLastExecute > 200) {
+                    touchHandled = true;
+                    lastExecuteTime = Date.now();
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    // Small delay to ensure visual feedback is seen
+                    setTimeout(() => {
+                        handler.call(button, e);
+                    }, 50);
+                }
+            });
+            
+            button.addEventListener('touchcancel', function() {
+                // Reset visual feedback on cancel
+                button.style.transform = '';
+                button.style.transition = '';
+                touchHandled = true;
+            });
+            
+            // Mouse events for desktop (with duplicate prevention)
+            button.addEventListener('click', function(e) {
+                // Prevent double execution if touch event already handled this
+                if (touchHandled) {
+                    touchHandled = false;
+                    return;
+                }
+                
+                const timeSinceLastExecute = Date.now() - lastExecuteTime;
+                
+                // Small delay to allow touch events to handle first
+                setTimeout(() => {
+                    if (!touchHandled && !button.disabled && timeSinceLastExecute > 200) {
+                        lastExecuteTime = Date.now();
+                        handler.call(button, e);
+                    }
+                }, 10);
             });
         }
 
@@ -1452,15 +1550,21 @@
                 input.setAttribute('data-listeners-attached', 'true');
             });
             
-            // Attach pagination event listeners only once
+            // Attach pagination event listeners only once with mobile optimization
             const prevBtn = document.getElementById('prevPage');
             const nextBtn = document.getElementById('nextPage');
             if (prevBtn && !prevBtn.hasAttribute('data-listener-attached')) {
-                prevBtn.addEventListener('click', () => { currentPage = Math.max(1, currentPage - 1); render(); });
+                addMobileButtonHandler(prevBtn, () => { 
+                    currentPage = Math.max(1, currentPage - 1); 
+                    render(); 
+                });
                 prevBtn.setAttribute('data-listener-attached', 'true');
             }
             if (nextBtn && !nextBtn.hasAttribute('data-listener-attached')) {
-                nextBtn.addEventListener('click', () => { currentPage += 1; render(); });
+                addMobileButtonHandler(nextBtn, () => { 
+                    currentPage += 1; 
+                    render(); 
+                });
                 nextBtn.setAttribute('data-listener-attached', 'true');
             }
         }
@@ -1846,9 +1950,10 @@
                     });
                 }
                 
-                // Prevent double-tap zoom on buttons
+                // Prevent double-tap zoom on buttons (but allow our custom handlers to work)
                 document.addEventListener('touchend', function(event) {
-                    if (event.target.tagName === 'BUTTON' || event.target.type === 'button') {
+                    if ((event.target.tagName === 'BUTTON' || event.target.type === 'button') && 
+                        !event.target.hasAttribute('data-mobile-handler')) {
                         event.preventDefault();
                     }
                 });
