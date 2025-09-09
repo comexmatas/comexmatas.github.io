@@ -448,7 +448,7 @@
         const GITHUB_OWNER = 'comexmatas';
         const GITHUB_REPO = 'comexmatas.github.io';
         const SESSION_KEY = 'github_token';
-        const DEBUG = true; // Set to true for debugging
+        const DEBUG = false; // Set to true for debugging
         
         // UI elements
         const loadButton = document.getElementById('loadButton');
@@ -884,36 +884,76 @@
                 syncButton.textContent = 'Syncing...';
 
                 // Get current file from GitHub
-                const fileInfo = await getFileFromGitHub();
-                debugLog('File retrieved from GitHub', { size: fileInfo.content.length, sha: fileInfo.sha.substring(0, 8) });
+                let fileInfo, currentRows;
                 
-                // Parse the current file
-                const currentWorkbook = XLSX.read(fileInfo.content, { 
-                    type: 'array',
-                    cellFormula: false,
-                    cellHTML: false
-                });
-                
-                const currentSheet = currentWorkbook.Sheets[currentWorkbook.SheetNames[0]];
-                const currentRows = XLSX.utils.sheet_to_json(currentSheet, { header: 1, blankrows: false });
-                debugLog('Current file parsed', { rows: currentRows.length });
+                try {
+                    fileInfo = await getFileFromGitHub();
+                    debugLog('File retrieved from GitHub', { size: fileInfo.content.length, sha: fileInfo.sha.substring(0, 8) });
+                    
+                    // Parse the current file
+                    const currentWorkbook = XLSX.read(fileInfo.content, { 
+                        type: 'array',
+                        cellFormula: false,
+                        cellHTML: false
+                    });
+                    
+                    debugLog('Workbook parsed', { sheetNames: currentWorkbook.SheetNames });
+                    
+                    const currentSheet = currentWorkbook.Sheets[currentWorkbook.SheetNames[0]];
+                    currentRows = XLSX.utils.sheet_to_json(currentSheet, { header: 1, blankrows: false });
+                    debugLog('Current file parsed', { 
+                        rows: currentRows.length,
+                        firstRow: currentRows[0],
+                        secondRow: currentRows[1],
+                        hasHeaders: currentRows.length > 0 && Array.isArray(currentRows[0]) && currentRows[0].length > 0
+                    });
+                } catch (error) {
+                    if (error.message.includes('404')) {
+                        // File doesn't exist, use local data structure
+                        debugLog('File not found on GitHub, using local structure');
+                        currentRows = [headersRef, ...allRows.map(row => headersRef.map(h => row[h] || ''))];
+                        fileInfo = null; // Will create new file
+                    } else {
+                        throw error;
+                    }
+                }
                 
                 // Update rows with changes
                 const updatedRows = updateRowsWithChanges(currentRows, dirtyById);
                 debugLog('Rows updated with changes', { originalRows: currentRows.length, updatedRows: updatedRows.length });
                 
+                // Safety check: ensure we have valid data structure
+                if (!Array.isArray(updatedRows)) {
+                    throw new Error('Data integrity check failed: updatedRows is not an array');
+                }
+                
+                if (updatedRows.length === 0) {
+                    throw new Error('Data integrity check failed: No rows returned from updateRowsWithChanges');
+                }
+                
                 // Safety check: ensure we haven't lost data
                 if (updatedRows.length < currentRows.length) {
+                    debugLog('Row count mismatch', { original: currentRows.length, updated: updatedRows.length });
                     throw new Error(`Data integrity check failed: Original had ${currentRows.length} rows, updated has ${updatedRows.length} rows`);
                 }
                 
                 // Safety check: ensure headers are still present
-                if (!updatedRows[0] || updatedRows[0].length === 0) {
-                    throw new Error('Data integrity check failed: Headers are missing');
+                if (!updatedRows[0] || !Array.isArray(updatedRows[0]) || updatedRows[0].length === 0) {
+                    debugLog('Headers check failed', { 
+                        firstRowExists: !!updatedRows[0], 
+                        isArray: Array.isArray(updatedRows[0]), 
+                        length: updatedRows[0] ? updatedRows[0].length : 'N/A',
+                        firstRow: updatedRows[0]
+                    });
+                    throw new Error('Data integrity check failed: Headers are missing or invalid');
                 }
                 
                 // Safety check: ensure we have data rows
                 if (updatedRows.length < 2 && currentRows.length >= 2) {
+                    debugLog('Data rows check failed', { 
+                        originalDataRows: currentRows.length - 1, 
+                        updatedDataRows: updatedRows.length - 1 
+                    });
                     throw new Error('Data integrity check failed: Data rows are missing');
                 }
                 
@@ -934,9 +974,13 @@
                 const updatePayload = {
                     message: commitMessage,
                     content: base64Content,
-                    sha: fileInfo.sha,
                     branch: 'main'
                 };
+                
+                // Only include SHA if file exists
+                if (fileInfo && fileInfo.sha) {
+                    updatePayload.sha = fileInfo.sha;
+                }
                 
                 const updateResponse = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
                     method: 'PUT',
@@ -996,10 +1040,29 @@
         }
         
         function updateRowsWithChanges(rows, changes) {
-            if (!rows || rows.length === 0) return rows;
+            if (!rows || rows.length === 0) {
+                debugLog('updateRowsWithChanges: No input rows');
+                return rows || [];
+            }
+            
+            if (!Array.isArray(rows)) {
+                debugLog('updateRowsWithChanges: Input is not an array', { type: typeof rows });
+                return [];
+            }
+            
+            if (rows.length < 1) {
+                debugLog('updateRowsWithChanges: Input has no rows');
+                return rows;
+            }
             
             const headers = rows[0];
             const dataRows = rows.slice(1);
+            
+            if (!Array.isArray(headers)) {
+                debugLog('updateRowsWithChanges: Headers row is not an array', { headers });
+                // Return original rows if headers are problematic
+                return rows;
+            }
             
             debugLog('updateRowsWithChanges input', { 
                 headersCount: headers.length, 
