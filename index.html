@@ -931,8 +931,18 @@
                     
                     // Decode base64 content
                     console.log('Decoding base64 content...');
-                    const content = atob(data.content);
+                    console.log('Raw base64 content (first 100 chars):', data.content.substring(0, 100));
+                    
+                    // GitHub API returns base64 content with newlines, need to clean it
+                    const cleanBase64 = data.content.replace(/\s/g, '');
+                    console.log('Cleaned base64 length:', cleanBase64.length);
+                    
+                    const content = atob(cleanBase64);
                     console.log('Decoded content length:', content.length);
+                    
+                    if (content.length === 0) {
+                        throw new Error('Decoded content is empty - file may be corrupted');
+                    }
                     
                     const arrayBuffer = Uint8Array.from(content, c => c.charCodeAt(0)).buffer;
                     console.log('Array buffer created, size:', arrayBuffer.byteLength);
@@ -942,10 +952,31 @@
                     const workbook = XLSX.read(arrayBuffer, { type: 'array' });
                     console.log('Workbook sheets:', workbook.SheetNames);
                     
+                    if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+                        throw new Error('No sheets found in the Excel file');
+                    }
+                    
                     const firstSheetName = workbook.SheetNames[0];
+                    console.log('Using sheet:', firstSheetName);
                     const firstSheet = workbook.Sheets[firstSheetName];
-                    const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, blankrows: false });
-                    console.log('Parsed rows count:', rows.length);
+                    
+                    if (!firstSheet) {
+                        throw new Error('First sheet is empty or invalid');
+                    }
+                    
+                    console.log('Sheet range:', firstSheet['!ref']);
+                    
+                    // Try multiple parsing approaches
+                    let rows;
+                    try {
+                        rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, blankrows: false });
+                        console.log('Method 1 - Parsed rows count:', rows.length);
+                    } catch (e) {
+                        console.log('Method 1 failed, trying alternative parsing...');
+                        rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, raw: true, defval: '' });
+                        console.log('Method 2 - Parsed rows count:', rows.length);
+                    }
+                    
                     console.log('First few rows:', rows.slice(0, 3));
                     
                     if (!rows || rows.length === 0) {
@@ -1034,8 +1065,14 @@
                 const updatedWb = buildUpdatedWorkbook();
                 const buffer = XLSX.write(updatedWb, { type: 'array', bookType: 'xlsx' });
                 
-                // Convert to base64
-                const base64Content = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+                // Convert to base64 (using proper binary string conversion)
+                const uint8Array = new Uint8Array(buffer);
+                let binaryString = '';
+                for (let i = 0; i < uint8Array.length; i++) {
+                    binaryString += String.fromCharCode(uint8Array[i]);
+                }
+                const base64Content = btoa(binaryString);
+                console.log('Generated base64 content length:', base64Content.length);
                 
                 const message = `Update product prices - ${new Date().toLocaleString()}`;
                 
