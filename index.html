@@ -1179,7 +1179,7 @@
                 // Proceed directly with sync (no confirmation dialog)
                 
                 try {
-                    await attemptSync();
+                    await smartSync();
                 } catch (e) {
                     console.error('Sync failed:', e);
                     alert(`Sync failed: ${e.message}`);
@@ -1352,10 +1352,23 @@
                 dataContainer.innerHTML = '<div class="loading">Loading data from GitHub...</div>';
                 errorMessage.innerHTML = '';
 
-                // Load from GitHub using the same method as barcode-scanner-app
-                const fileInfo = await getFileFromGitHub();
-                const csvText = new TextDecoder().decode(fileInfo.content);
-                lastCommitSha = fileInfo.sha;
+                // Load from GitHub using direct API approach
+                const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
+                    headers: {
+                        'Authorization': `token ${authToken}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to get file from GitHub: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                lastCommitSha = data.sha;
+                
+                // Decode base64 content
+                const csvText = atob(data.content);
                 
                 // Parse CSV using Papa Parse
                 const parsed = Papa.parse(csvText, {
@@ -1672,63 +1685,79 @@
             }
         }
         
-        async function attemptSync() {
+        async function smartSync() {
             if (!authToken) {
                 throw new Error('Authentication required. Please login again.');
             }
 
+            statusText.textContent = 'Syncing with GitHub...';
+            syncButton.disabled = true;
+            syncButton.textContent = 'Syncing...';
+            
             try {
-                debugLog('Starting session-only sync process');
-                debugLog('Session changes to sync', { count: localChanges.size, changes: Array.from(localChanges) });
-                statusText.textContent = 'Syncing with GitHub...';
-                syncButton.disabled = true;
-                syncButton.textContent = 'Syncing...';
-                
                 // Clear draft immediately when sync starts to prevent restoration issues
                 localStorage.removeItem('priceDraft');
 
-                // Step 1: Load current file from GitHub
-                let fileInfo, remoteDatabase = [];
+                // Step 1: Load from GitHub
+                const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
+                    headers: {
+                        'Authorization': `token ${authToken}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                });
+
+                let remoteDatabase = [];
                 let hasRemoteData = false;
-                
-                try {
-                    fileInfo = await getFileFromGitHub();
-                    debugLog('File retrieved from GitHub', { size: fileInfo.content.length, sha: fileInfo.sha.substring(0, 8) });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    lastCommitSha = data.sha;
                     
-                    // Store the current file SHA for update
-                    lastCommitSha = fileInfo.sha;
+                    // Decode base64 content
+                    const content = atob(data.content);
                     
-                    // Parse the current CSV file
-                    const csvText = new TextDecoder().decode(fileInfo.content);
-                    const parsed = Papa.parse(csvText, {
+                    // Parse CSV
+                    const parsed = Papa.parse(content, {
                         header: true,
                         dynamicTyping: false,
                         skipEmptyLines: true
                     });
                     
-                    // Convert to our internal format
-                    remoteDatabase = parsed.data.map((row, idx) => rowToObject(Object.keys(row), Object.values(row), idx))
-                                                  .filter(item => item.__id);
+                    // Convert to our internal format matching the existing allRows structure
+                    remoteDatabase = parsed.data.map((row, idx) => {
+                        const obj = {};
+                        Object.keys(row).forEach(key => {
+                            obj[key] = String(row[key] || '');
+                        });
+                        obj.__rowIndex = idx;
+                        
+                        // Try multiple ways to find product ID
+                        const productIdFields = ['product_id', 'Product ID', 'productid', 'id', 'ID'];
+                        let productId = '';
+                        
+                        for (const field of productIdFields) {
+                            if (obj[field] && String(obj[field]).trim()) {
+                                productId = String(obj[field]).trim();
+                                break;
+                            }
+                        }
+                        
+                        obj.__id = productId || `row_${idx}`;
+                        return obj;
+                    }).filter(item => item.__id);
+                    
                     hasRemoteData = true;
-                    debugLog('Remote CSV parsed', { rows: remoteDatabase.length });
-                } catch (error) {
-                    if (error.message.includes('404')) {
-                        // File doesn't exist, use local data structure
-                        debugLog('File not found on GitHub, using local structure');
-                        remoteDatabase = [];
-                        hasRemoteData = false;
-                        fileInfo = null; // Will create new file
-                        lastCommitSha = null; // No SHA needed for new file creation
-                    } else {
-                        throw error;
-                    }
+                } else if (response.status === 404) {
+                    // File doesn't exist yet
+                    hasRemoteData = false;
+                } else {
+                    throw new Error('Failed to load data');
                 }
-                
+
                 // Step 2: Merge databases
                 const mergedDatabase = mergeDatabase(allRows, remoteDatabase);
-                debugLog('Database merged', { localRows: allRows.length, remoteRows: remoteDatabase.length, mergedRows: mergedDatabase.length });
                 
-                // Step 3: Check for overwrites and warn user
+                // Step 3: Check for overwrites and warn
                 const overwrites = detectOverwrites(allRows, remoteDatabase);
                 
                 if (overwrites.length > 0 && localChanges.size > 0) {
@@ -1738,11 +1767,11 @@
                                   '\n\nContinue?';
                     
                     if (!confirm(message)) {
-                        statusText.textContent = 'Sync cancelled by user';
+                        statusText.textContent = 'Sync cancelled';
                         return;
                     }
                 }
-                
+
                 // Step 4: Update local database
                 allRows = mergedDatabase;
                 filteredRows = allRows;
@@ -1762,14 +1791,13 @@
                 
                 // Step 8: Update UI
                 currentPage = 1;
-                statusText.textContent = `Synced ${changeCount} session changes to GitHub`;
+                const newRecords = mergedDatabase.length - (hasRemoteData ? remoteDatabase.length : 0);
+                statusText.textContent = `✅ Sync complete! ${allRows.length} total records${newRecords > 0 ? ` (+${newRecords} new)` : ''}`;
                 render();
-                
-                // Success notification is shown in status text only
                 
             } catch (error) {
                 console.error('Sync failed:', error);
-                debugLog('Sync error:', error.message);
+                statusText.textContent = `❌ Sync failed: ${error.message}`;
                 throw error;
             } finally {
                 syncButton.disabled = false;
@@ -1786,29 +1814,25 @@
                 merged.set(item.__id, {...item});
             });
             
-            // Then, overwrite with local records where there are changes
+            // Then, overwrite with local records (local wins)
             local.forEach(item => {
-                const itemId = item.__id;
-                if (localChanges.has(itemId)) {
-                    // This is a local change, update with local data and sync timestamp
+                if (localChanges.has(item.__id)) {
+                    // This is a local change, update sync timestamp
                     const updatedItem = {...item};
                     
                     // Apply local price changes
-                    if (dirtyById.has(itemId)) {
+                    if (dirtyById.has(item.__id)) {
                         // Set price in both the new preferred column name and legacy column for compatibility
-                        updatedItem.Price = dirtyById.get(itemId);
-                        updatedItem.competitor_price = dirtyById.get(itemId);
+                        updatedItem.Price = dirtyById.get(item.__id);
+                        updatedItem.competitor_price = dirtyById.get(item.__id);
                     }
                     
-                    // Add sync timestamp (but filter it out from display)
                     updatedItem.lastSyncedAt = syncTimestamp;
-                    
-                    merged.set(itemId, updatedItem);
-                } else if (!merged.has(itemId)) {
-                    // New item that wasn't in remote, add it
-                    merged.set(itemId, {...item});
+                    merged.set(item.__id, updatedItem);
+                } else {
+                    // Keep existing remote item (no local changes)
+                    // Don't overwrite remote
                 }
-                // If item exists in remote and no local changes, keep remote version
             });
             
             return Array.from(merged.values());
@@ -1818,15 +1842,16 @@
             const overwrites = [];
             
             local.forEach(localItem => {
-                const itemId = localItem.__id;
-                if (localChanges.has(itemId)) {
-                    const remoteItem = remote.find(r => r.__id === itemId);
-                    if (remoteItem && remoteItem.lastSyncedAt && lastSyncTime) {
+                if (localChanges.has(localItem.__id)) {
+                    const remoteItem = remote.find(r => r.__id === localItem.__id);
+                    if (remoteItem) {
                         // Check if remote has been modified since our last sync
-                        const remoteSync = new Date(remoteItem.lastSyncedAt);
-                        const ourLastSync = new Date(lastSyncTime);
-                        if (remoteSync > ourLastSync) {
-                            overwrites.push(itemId);
+                        if (remoteItem.lastSyncedAt && lastSyncTime) {
+                            const remoteSync = new Date(remoteItem.lastSyncedAt);
+                            const ourLastSync = new Date(lastSyncTime);
+                            if (remoteSync > ourLastSync) {
+                                overwrites.push(localItem.__id);
+                            }
                         }
                     }
                 }
@@ -1834,64 +1859,16 @@
             
             return overwrites;
         }
-        
-        async function getFileFromGitHub() {
-            const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
-                headers: {
-                    'Authorization': `token ${authToken}`,
-                    'Accept': 'application/vnd.github.v3+json'
-                }
-            });
-            
-            if (!response.ok) {
-                throw new Error(`Failed to get file from GitHub: ${response.status} ${response.statusText}`);
-            }
-            
-            const data = await response.json();
-            const content = new Uint8Array(atob(data.content).split('').map(c => c.charCodeAt(0)));
-            
-            return {
-                content: content,
-                sha: data.sha
-            };
-        }
-        
 
         async function pushToGitHub() {
-            // Convert merged database back to CSV format
-            if (allRows.length === 0) {
-                debugLog('No data to push');
-                return;
-            }
+            // Add sync timestamp to all records
+            const syncTimestamp = new Date().toISOString();
             
-            // Create CSV headers and data
-            const headers = headersRef && headersRef.length > 0 ? [...headersRef] : Object.keys(allRows[0]).filter(key => !key.startsWith('__'));
-            
-            // Ensure we have lastSyncedAt column for tracking
-            if (!headers.includes('lastSyncedAt')) {
-                headers.push('lastSyncedAt');
-            }
-            
-            // Convert rows to CSV format
-            const csvData = allRows.map(row => {
-                return headers.map(header => {
-                    if (header === 'lastSyncedAt' && row[header]) {
-                        return row[header];
-                    }
-                    return row[header] || '';
-                });
-            });
-            
-            // Add headers as first row
-            const csvWithHeaders = [headers, ...csvData];
-            
-            // Convert to CSV string
-            const csv = Papa.unparse(csvWithHeaders, {
-                header: false
-            });
-            
+            // Convert database to CSV
+            const csv = Papa.unparse(allRows);
             const content = btoa(unescape(encodeURIComponent(csv))); // Better encoding for special characters
-            const message = `Session sync: ${localChanges.size} price changes at ${new Date().toLocaleString()}`;
+            
+            const message = `Sync at ${new Date().toLocaleString()}`;
             
             const body = {
                 message: message,
@@ -1901,9 +1878,6 @@
             
             if (lastCommitSha) {
                 body.sha = lastCommitSha;
-                debugLog('Using SHA for update', { sha: lastCommitSha.substring(0, 8) });
-            } else {
-                debugLog('No SHA available - this might be a new file creation');
             }
             
             const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DEFAULT_FILE}`, {
@@ -1915,17 +1889,16 @@
                 },
                 body: JSON.stringify(body)
             });
-            
-            if (!response.ok) {
+
+            if (response.ok) {
+                const data = await response.json();
+                lastCommitSha = data.content.sha;
+                lastSyncTime = syncTimestamp;
+                localStorage.setItem('lastSyncTime', lastSyncTime);
+            } else {
                 const error = await response.json();
                 throw new Error(error.message || 'Failed to push to GitHub');
             }
-            
-            const data = await response.json();
-            lastCommitSha = data.content.sha;
-            debugLog('GitHub file updated successfully with smart sync');
-            
-            return data;
         }
 
         function displayEmpty() {
