@@ -1386,20 +1386,64 @@
                     
                     // Check if file is too large for direct content API (>1MB)
                     if (data.size > 1000000 || !data.content) {
-                        debugLog('File too large for content API, using download URL');
+                        debugLog('File too large for content API, using Git Data API');
                         
-                        // Use raw download URL for large files
-                        const downloadResponse = await fetch(data.download_url, {
-                            headers: {
-                                'Authorization': `token ${authToken}`
+                        // For large files, we need to use the Git Data API to get the blob
+                        // First, get the Git tree to find the file's SHA
+                        const treeResponse = await fetch(
+                            `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/git/trees/main?recursive=1`,
+                            {
+                                headers: {
+                                    'Authorization': `token ${authToken}`,
+                                    'Accept': 'application/vnd.github.v3+json'
+                                }
                             }
-                        });
+                        );
                         
-                        if (downloadResponse.ok) {
-                            content = await downloadResponse.text();
-                            debugLog('Downloaded file successfully, size:', content.length);
-                        } else {
-                            throw new Error(`Failed to download large file: ${downloadResponse.status}`);
+                        if (!treeResponse.ok) {
+                            throw new Error(`Failed to get repository tree: ${treeResponse.status}`);
+                        }
+                        
+                        const treeData = await treeResponse.json();
+                        const fileEntry = treeData.tree.find(entry => entry.path === filePath);
+                        
+                        if (!fileEntry) {
+                            throw new Error(`File ${filePath} not found in repository`);
+                        }
+                        
+                        debugLog('Found file in tree, SHA:', fileEntry.sha);
+                        
+                        // Now get the blob content
+                        const blobResponse = await fetch(
+                            `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/git/blobs/${fileEntry.sha}`,
+                            {
+                                headers: {
+                                    'Authorization': `token ${authToken}`,
+                                    'Accept': 'application/vnd.github.v3+json'
+                                }
+                            }
+                        );
+                        
+                        if (!blobResponse.ok) {
+                            throw new Error(`Failed to get blob content: ${blobResponse.status}`);
+                        }
+                        
+                        const blobData = await blobResponse.json();
+                        debugLog('Got blob data, size:', blobData.size, 'encoding:', blobData.encoding);
+                        
+                        // Decode the base64 content
+                        const cleanContent = blobData.content.replace(/\s/g, '');
+                        try {
+                            const binaryString = atob(cleanContent);
+                            const bytes = new Uint8Array(binaryString.length);
+                            for (let i = 0; i < binaryString.length; i++) {
+                                bytes[i] = binaryString.charCodeAt(i);
+                            }
+                            content = new TextDecoder('utf-8').decode(bytes);
+                            debugLog('Successfully decoded large file, content length:', content.length);
+                        } catch (e) {
+                            debugLog('UTF-8 decoding failed for large file, falling back to simple atob:', e);
+                            content = atob(cleanContent);
                         }
                     } else {
                         // Small file, use base64 content
@@ -1810,17 +1854,56 @@
                     
                     // Check if file is too large for direct content API (>1MB)
                     if (data.size > 1000000 || !data.content) {
-                        // Use raw download URL for large files
-                        const downloadResponse = await fetch(data.download_url, {
-                            headers: {
-                                'Authorization': `token ${authToken}`
+                        // For large files, use the Git Data API to get the blob
+                        const treeResponse = await fetch(
+                            `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/git/trees/main?recursive=1`,
+                            {
+                                headers: {
+                                    'Authorization': `token ${authToken}`,
+                                    'Accept': 'application/vnd.github.v3+json'
+                                }
                             }
-                        });
+                        );
                         
-                        if (downloadResponse.ok) {
-                            content = await downloadResponse.text();
-                        } else {
-                            throw new Error(`Failed to download large file: ${downloadResponse.status}`);
+                        if (!treeResponse.ok) {
+                            throw new Error(`Failed to get repository tree: ${treeResponse.status}`);
+                        }
+                        
+                        const treeData = await treeResponse.json();
+                        const fileEntry = treeData.tree.find(entry => entry.path === DEFAULT_FILE);
+                        
+                        if (!fileEntry) {
+                            throw new Error(`File ${DEFAULT_FILE} not found in repository`);
+                        }
+                        
+                        // Get the blob content
+                        const blobResponse = await fetch(
+                            `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/git/blobs/${fileEntry.sha}`,
+                            {
+                                headers: {
+                                    'Authorization': `token ${authToken}`,
+                                    'Accept': 'application/vnd.github.v3+json'
+                                }
+                            }
+                        );
+                        
+                        if (!blobResponse.ok) {
+                            throw new Error(`Failed to get blob content: ${blobResponse.status}`);
+                        }
+                        
+                        const blobData = await blobResponse.json();
+                        
+                        // Decode the base64 content
+                        const cleanContent = blobData.content.replace(/\s/g, '');
+                        try {
+                            const binaryString = atob(cleanContent);
+                            const bytes = new Uint8Array(binaryString.length);
+                            for (let i = 0; i < binaryString.length; i++) {
+                                bytes[i] = binaryString.charCodeAt(i);
+                            }
+                            content = new TextDecoder('utf-8').decode(bytes);
+                        } catch (e) {
+                            content = atob(cleanContent);
                         }
                     } else {
                         // Small file, use base64 content
