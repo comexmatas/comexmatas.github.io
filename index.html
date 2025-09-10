@@ -1513,16 +1513,8 @@
                     });
                     obj.__rowIndex = idx;
                     
-                    // Try multiple ways to find product ID
-                    const productIdFields = ['product_id', 'Product ID', 'productid', 'id', 'ID'];
-                    let productId = '';
-                    
-                    for (const field of productIdFields) {
-                        if (obj[field] && String(obj[field]).trim()) {
-                            productId = String(obj[field]).trim();
-                            break;
-                        }
-                    }
+                    // Use Product ID column for unique identifier
+                    const productId = String(obj['Product ID'] || '').trim();
                     
                     obj.__id = productId || `row_${idx}`;
                     return obj;
@@ -1562,16 +1554,8 @@
             headers.forEach((h, i) => { obj[h] = row[i] ?? ''; });
             obj.__rowIndex = idx;
             
-            // Try multiple ways to find product ID
-            const productIdFields = ['product_id', 'Product ID', 'productid', 'id', 'ID'];
-            let productId = '';
-            
-            for (const field of productIdFields) {
-                if (obj[field] && String(obj[field]).trim()) {
-                    productId = String(obj[field]).trim();
-                    break;
-                }
-            }
+            // Use Product ID column for unique identifier
+            const productId = String(obj['Product ID'] || '').trim();
             
             obj.__id = productId || `row_${idx}`;
             return obj;
@@ -1583,8 +1567,9 @@
                 return;
             }
             const q = query.toLowerCase();
-            const fields = ['Product ID', 'Brand', 'Product', 'Category', 'product_id', 'brand', 'product', 'category', 'Product Name', 'product_name', 'productname'];
-            filteredRows = allRows.filter(r => fields.some(f => String(r[f] ?? '').toLowerCase().includes(q)));
+            // Search in Product ID, Product, Brand, and Category columns
+            const searchFields = ['Product ID', 'Product', 'Brand', 'Category'];
+            filteredRows = allRows.filter(r => searchFields.some(f => String(r[f] ?? '').toLowerCase().includes(q)));
         }
 
         function render() {
@@ -1603,53 +1588,11 @@
         }
 
         function buildTable(headers, rows) {
-            // Define mobile-friendly column order: Image URL, Product, Price, Brand, Category
-            const preferredOrder = [
-                'Image URL', 'image_url', 'imageurl', 'image',
-                'Product', 
-                'Price',
-                'Brand', 'brand',
-                'Category', 'category'
-            ];
+            // Use exact CSV column structure - display columns in optimal mobile order
+            const displayColumns = ['Image URL', 'Product', 'Price', 'Brand', 'Category'];
             
-            // Find matching headers for each preferred column
-            const orderedHeaders = [];
-            const usedHeaders = new Set();
-            
-            // First, add headers in preferred order
-            preferredOrder.forEach(preferred => {
-                const matchingHeader = headers.find(h => {
-                    const headerLc = String(h || '').toLowerCase();
-                    const preferredLc = preferred.toLowerCase();
-                    return headerLc === preferredLc && !usedHeaders.has(h);
-                });
-                if (matchingHeader) {
-                    orderedHeaders.push(matchingHeader);
-                    usedHeaders.add(matchingHeader);
-                }
-            });
-            
-            // Then add any remaining important headers that weren't filtered out
-            const visibleHeaders = headers.filter(h => {
-                const headerLc = String(h || '').toLowerCase();
-                return !usedHeaders.has(h) &&
-                       !(headerLc.includes('url') && !headerLc.includes('image')) && 
-                       !headerLc.includes('lastsyncedat') && 
-                       !headerLc.includes('last_synced_at') &&
-                       !headerLc.includes('lastsync') &&
-                       !headerLc.includes('sync_date') &&
-                       !headerLc.includes('syncdate') &&
-                       !headerLc.includes('sync_time') &&
-                       !headerLc.includes('synctime') &&
-                       !headerLc.includes('last_updated_at') &&
-                       !headerLc.includes('lastupdatedat') &&
-                       !headerLc.includes('product_id') && // Hide product ID on mobile for space
-                       !headerLc.includes('productid') &&
-                       !headerLc.includes('id');
-            });
-            
-            // Combine ordered headers with remaining visible headers
-            const finalHeaders = [...orderedHeaders, ...visibleHeaders];
+            // Filter to only show the columns we want (hide Product ID and URL)
+            const finalHeaders = displayColumns.filter(col => headers.includes(col));
             
             const thead = `
                 <thead>
@@ -1661,17 +1604,14 @@
                 const rowId = r.__id;
                 // Only mark as dirty if it's a user session change
                 const isDirty = localChanges.has(rowId);
-                // Use user changed value if exists, otherwise use original CSV value
-                const priceVal = localChanges.has(rowId) ? dirtyById.get(rowId) : (r['Price'] || r['price'] || r['competitor_price'] || '');
+                // Use user changed value if exists, otherwise use original CSV Price column
+                const priceVal = localChanges.has(rowId) ? dirtyById.get(rowId) : (r['Price'] || '');
                 const rowClass = isDirty ? ' class="row-dirty"' : '';
                 
                 const cells = finalHeaders.map(h => {
                     const headerLc = String(h || '').toLowerCase();
-                    // Check if this is a price column that should be editable
-                    const isPriceColumn = headerLc === 'price' || 
-                                        headerLc === 'competitor_price' || 
-                                        headerLc === 'competitor price' ||
-                                        headerLc === 'competitorprice';
+                    // Check if this is the Price column (editable)
+                    const isPriceColumn = h === 'Price';
                     
                     if (isPriceColumn) {
                         // Render price as editable input
@@ -1697,21 +1637,11 @@
         }
 
         function renderCell(header, value, rowData = null) {
-            const headerLc = String(header || '').toLowerCase();
             const text = String(value ?? '');
             
-            // Handle Product column as clickable links using URL from row data
-            if (headerLc.includes('product') && rowData) {
-                // Look for URL field in the row data
-                const urlFields = ['URL', 'url', 'Link', 'link', 'Product URL', 'product_url'];
-                let productUrl = '';
-                
-                for (const field of urlFields) {
-                    if (rowData[field] && String(rowData[field]).trim()) {
-                        productUrl = String(rowData[field]).trim();
-                        break;
-                    }
-                }
+            // Handle Product column as clickable links using URL column
+            if (header === 'Product' && rowData) {
+                const productUrl = rowData['URL'];
                 
                 if (productUrl && isValidUrl(productUrl)) {
                     const safeUrl = escapeAttr(productUrl);
@@ -1720,8 +1650,8 @@
                 }
             }
             
-            // Handle image URLs (for Image URL columns that might still exist)
-            if (headerLc.includes('image') && text && isValidUrl(text)) {
+            // Handle Image URL column
+            if (header === 'Image URL' && text && isValidUrl(text)) {
                 const safeUrl = escapeAttr(text);
                 return `<img src="${safeUrl}" class="thumb" onclick="openModal('${safeUrl}')" onerror="this.style.display='none'; this.onerror=null;" />`;
             }
@@ -1937,16 +1867,8 @@
                         });
                         obj.__rowIndex = idx;
                         
-                        // Try multiple ways to find product ID
-                        const productIdFields = ['product_id', 'Product ID', 'productid', 'id', 'ID'];
-                        let productId = '';
-                        
-                        for (const field of productIdFields) {
-                            if (obj[field] && String(obj[field]).trim()) {
-                                productId = String(obj[field]).trim();
-                                break;
-                            }
-                        }
+                        // Use Product ID column for unique identifier
+                        const productId = String(obj['Product ID'] || '').trim();
                         
                         obj.__id = productId || `row_${idx}`;
                         return obj;
@@ -2025,10 +1947,8 @@
                     
                     // Apply local price changes
                     if (dirtyById.has(item.__id)) {
-                        // Update price fields
+                        // Update the Price field to match CSV structure
                         updatedItem.Price = dirtyById.get(item.__id);
-                        updatedItem.price = dirtyById.get(item.__id);
-                        updatedItem.competitor_price = dirtyById.get(item.__id);
                     }
                     
                     updatedItem.lastSyncedAt = syncTimestamp;
@@ -2354,7 +2274,7 @@
                         Object.entries(draftData.changes).forEach(([key, value]) => {
                             // Check if this is actually different from the original CSV value
                             const originalRow = allRows.find(row => row.__id === key);
-                            const originalPrice = originalRow ? (originalRow['Price'] || originalRow['price'] || originalRow['competitor_price'] || '') : '';
+                            const originalPrice = originalRow ? (originalRow['Price'] || '') : '';
                             
                             // Only restore if the draft value is different from original CSV
                             if (value !== originalPrice) {
