@@ -1058,7 +1058,7 @@
     
     <div class="controls">
             <div class="controls-row">
-                <input id="searchInput" class="search-input" type="search" placeholder="Search Products" inputmode="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+                <input id="searchInput" class="search-input" type="search" placeholder="Search by Product or Varenummer" inputmode="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
                 <select id="brandFilter" class="filter-select">
                     <option value="">All Brands</option>
                 </select>
@@ -1653,7 +1653,7 @@
             
             filteredRows = allRows.filter(row => {
                 // Apply text search
-                const matchesSearch = !searchQuery || ['Product'].some(
+                const matchesSearch = !searchQuery || ['Product', 'Product ID'].some(
                     field => String(row[field] || '').toLowerCase().includes(searchQuery)
                 );
                 
