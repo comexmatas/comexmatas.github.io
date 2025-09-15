@@ -84,9 +84,36 @@
         
         .controls-row {
             display: grid;
-            grid-template-columns: 1fr auto auto;
+            grid-template-columns: 1fr auto auto auto auto;
             gap: 12px;
             align-items: end;
+        }
+        
+        .filter-select {
+            padding: 12px 18px;
+            border: 2px solid var(--matas-light-blue);
+            border-radius: 12px;
+            font-size: 15px;
+            background: var(--matas-white);
+            color: var(--matas-text);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            min-width: 150px;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23007CB2%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px top 50%;
+            background-size: 12px auto;
+            padding-right: 30px;
+        }
+        
+        .filter-select:focus {
+            outline: none;
+            border-color: var(--matas-blue);
+            box-shadow: 0 0 0 3px rgba(74, 144, 194, 0.15);
+            transform: translateY(-1px);
         }
         
         .search-input {
@@ -536,6 +563,14 @@
             .controls-row {
                 grid-template-columns: 1fr;
                 gap: 15px;
+            }
+            
+            .filter-select {
+                width: 100%;
+                padding: 14px 16px;
+                font-size: 16px;
+                border-radius: 10px;
+                min-height: 48px;
             }
 
             .search-input {
@@ -1022,11 +1057,17 @@
         </div>
     
     <div class="controls">
-        <div class="controls-row">
-            <input id="searchInput" class="search-input" type="search" placeholder="Search Product, Brand, Category" inputmode="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
-            <button id="loadButton" class="load-button">Load Data</button>
-            <button id="syncButton" class="sync-button" disabled>Sync</button>
-        </div>
+            <div class="controls-row">
+                <input id="searchInput" class="search-input" type="search" placeholder="Search Products" inputmode="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+                <select id="brandFilter" class="filter-select">
+                    <option value="">All Brands</option>
+                </select>
+                <select id="categoryFilter" class="filter-select">
+                    <option value="">All Categories</option>
+                </select>
+                <button id="loadButton" class="load-button">Load Data</button>
+                <button id="syncButton" class="sync-button" disabled>Sync</button>
+            </div>
         <div class="status-bar">
             <span id="statusText">No data loaded.</span>
             <span id="dirtyText"></span>
@@ -1159,6 +1200,24 @@
                     currentPage = 1;
                     render();
                 }, 200);
+            });
+            
+            // Filter handlers
+            const brandFilter = document.getElementById('brandFilter');
+            const categoryFilter = document.getElementById('categoryFilter');
+            
+            brandFilter.addEventListener('change', () => {
+                if (!allRows.length) return;
+                applySearch(searchInput.value.trim());
+                currentPage = 1;
+                render();
+            });
+            
+            categoryFilter.addEventListener('change', () => {
+                if (!allRows.length) return;
+                applySearch(searchInput.value.trim());
+                currentPage = 1;
+                render();
             });
             
             // Enhanced button event handling for mobile
@@ -1537,6 +1596,9 @@
                 syncButton.disabled = false;
                 statusText.textContent = `Loaded ${allRows.length} rows`;
                 
+                // Populate filters
+                populateFilters();
+                
                 // Try to restore any saved drafts
                 loadDraft();
                 
@@ -1561,15 +1623,48 @@
             return obj;
         }
 
+        function populateFilters() {
+            if (!allRows.length) return;
+            
+            const brandFilter = document.getElementById('brandFilter');
+            const categoryFilter = document.getElementById('categoryFilter');
+            
+            // Get unique values
+            const brands = new Set(allRows.map(r => r['Brand']).filter(Boolean));
+            const categories = new Set(allRows.map(r => r['Category']).filter(Boolean));
+            
+            // Sort values alphabetically
+            const sortedBrands = Array.from(brands).sort();
+            const sortedCategories = Array.from(categories).sort();
+            
+            // Populate brand filter
+            brandFilter.innerHTML = '<option value="">All Brands</option>' +
+                sortedBrands.map(brand => `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('');
+            
+            // Populate category filter
+            categoryFilter.innerHTML = '<option value="">All Categories</option>' +
+                sortedCategories.map(category => `<option value="${escapeAttr(category)}">${escapeHtml(category)}</option>`).join('');
+        }
+
         function applySearch(query) {
-            if (!query) {
-                filteredRows = allRows;
-                return;
-            }
-            const q = query.toLowerCase();
-            // Search in Product ID, Product, Brand, and Category columns
-            const searchFields = ['Product ID', 'Product', 'Brand', 'Category'];
-            filteredRows = allRows.filter(r => searchFields.some(f => String(r[f] ?? '').toLowerCase().includes(q)));
+            const searchQuery = query ? query.toLowerCase() : '';
+            const brandFilter = document.getElementById('brandFilter').value;
+            const categoryFilter = document.getElementById('categoryFilter').value;
+            
+            filteredRows = allRows.filter(row => {
+                // Apply text search
+                const matchesSearch = !searchQuery || ['Product'].some(
+                    field => String(row[field] || '').toLowerCase().includes(searchQuery)
+                );
+                
+                // Apply brand filter
+                const matchesBrand = !brandFilter || row['Brand'] === brandFilter;
+                
+                // Apply category filter
+                const matchesCategory = !categoryFilter || row['Category'] === categoryFilter;
+                
+                return matchesSearch && matchesBrand && matchesCategory;
+            });
         }
 
         function render() {
