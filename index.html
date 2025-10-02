@@ -6,11 +6,11 @@
     <title>Normal Prices Registry</title>
     <style>
         :root {
-            --matas-navy: #002945;
-            --matas-blue: #4a90c2;
-            --matas-light-blue: #e3f2fd;
+            --matas-navy: #8ca765;
+            --matas-blue: #65a765;
+            --matas-light-blue: #90EE90;
             --matas-white: #ffffff;
-            --matas-light-gray: #f8f9fa;
+            --matas-light-gray: #808080;
             --matas-gray: #6c757d;
             --matas-text: #333333;
         }
@@ -1061,11 +1061,14 @@
                 <input id="searchInput" class="search-input" type="search" placeholder="Search by Product or Varenummer" inputmode="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
                 <select id="brandFilter" class="filter-select">
                     <option value="">All Brands</option>
-                </select>
-                <select id="categoryFilter" class="filter-select">
-                    <option value="">All Categories</option>
-                </select>
-                <button id="loadButton" class="load-button">Load Data</button>
+				</select>
+				<select id="categoryFilter" class="filter-select">
+					<option value="">All Categories</option>
+				</select>
+				<select id="pricingRoleFilter" class="filter-select">
+					<option value="">All Pricing Roles</option>
+				</select>
+				<button id="loadButton" class="load-button">Load Data</button>
                 <button id="syncButton" class="sync-button" disabled>Sync</button>
             </div>
         <div class="status-bar">
@@ -1219,6 +1222,15 @@
                 currentPage = 1;
                 render();
             });
+			
+			const pricingRoleFilter = document.getElementById('pricingRoleFilter');
+
+			pricingRoleFilter.addEventListener('change', () => {
+				if (!allRows.length) return;
+				applySearch(searchInput.value.trim());
+				currentPage = 1;
+				render();
+			});
             
             // Enhanced button event handling for mobile
             addMobileButtonHandler(loadButton, function() {
@@ -1623,49 +1635,60 @@
             return obj;
         }
 
-        function populateFilters() {
-            if (!allRows.length) return;
-            
-            const brandFilter = document.getElementById('brandFilter');
-            const categoryFilter = document.getElementById('categoryFilter');
-            
-            // Get unique values
-            const brands = new Set(allRows.map(r => r['Brand']).filter(Boolean));
-            const categories = new Set(allRows.map(r => r['Category']).filter(Boolean));
-            
-            // Sort values alphabetically
-            const sortedBrands = Array.from(brands).sort();
-            const sortedCategories = Array.from(categories).sort();
-            
-            // Populate brand filter
-            brandFilter.innerHTML = '<option value="">All Brands</option>' +
-                sortedBrands.map(brand => `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('');
-            
-            // Populate category filter
-            categoryFilter.innerHTML = '<option value="">All Categories</option>' +
-                sortedCategories.map(category => `<option value="${escapeAttr(category)}">${escapeHtml(category)}</option>`).join('');
-        }
+		function populateFilters() {
+			if (!allRows.length) return;
+			
+			const brandFilter = document.getElementById('brandFilter');
+			const categoryFilter = document.getElementById('categoryFilter');
+			const pricingRoleFilter = document.getElementById('pricingRoleFilter');
+			
+			// Get unique values
+			const brands = new Set(allRows.map(r => r['Brand']).filter(Boolean));
+			const categories = new Set(allRows.map(r => r['Category']).filter(Boolean));
+			const pricingRoles = new Set(allRows.map(r => r['pricing_role_category']).filter(Boolean));
+			
+			// Sort values alphabetically
+			const sortedBrands = Array.from(brands).sort();
+			const sortedCategories = Array.from(categories).sort();
+			const sortedPricingRoles = Array.from(pricingRoles).sort();
+			
+			// Populate brand filter
+			brandFilter.innerHTML = '<option value="">All Brands</option>' +
+				sortedBrands.map(brand => `<option value="${escapeAttr(brand)}">${escapeHtml(brand)}</option>`).join('');
+			
+			// Populate category filter
+			categoryFilter.innerHTML = '<option value="">All Categories</option>' +
+				sortedCategories.map(category => `<option value="${escapeAttr(category)}">${escapeHtml(category)}</option>`).join('');
+			
+			// Populate pricing role filter
+			pricingRoleFilter.innerHTML = '<option value="">All Pricing Roles</option>' +
+				sortedPricingRoles.map(role => `<option value="${escapeAttr(role)}">${escapeHtml(role)}</option>`).join('');
+		}
 
-        function applySearch(query) {
-            const searchQuery = query ? query.toLowerCase() : '';
-            const brandFilter = document.getElementById('brandFilter').value;
-            const categoryFilter = document.getElementById('categoryFilter').value;
-            
-            filteredRows = allRows.filter(row => {
-                // Apply text search
-                const matchesSearch = !searchQuery || ['Product', 'Product ID'].some(
-                    field => String(row[field] || '').toLowerCase().includes(searchQuery)
-                );
-                
-                // Apply brand filter
-                const matchesBrand = !brandFilter || row['Brand'] === brandFilter;
-                
-                // Apply category filter
-                const matchesCategory = !categoryFilter || row['Category'] === categoryFilter;
-                
-                return matchesSearch && matchesBrand && matchesCategory;
-            });
-        }
+		function applySearch(query) {
+			const searchQuery = query ? query.toLowerCase() : '';
+			const brandFilter = document.getElementById('brandFilter').value;
+			const categoryFilter = document.getElementById('categoryFilter').value;
+			const pricingRoleFilter = document.getElementById('pricingRoleFilter').value;
+			
+			filteredRows = allRows.filter(row => {
+				// Apply text search
+				const matchesSearch = !searchQuery || ['Product', 'Product ID'].some(
+					field => String(row[field] || '').toLowerCase().includes(searchQuery)
+				);
+				
+				// Apply brand filter
+				const matchesBrand = !brandFilter || row['Brand'] === brandFilter;
+				
+				// Apply category filter
+				const matchesCategory = !categoryFilter || row['Category'] === categoryFilter;
+				
+				// Apply pricing role filter
+				const matchesPricingRole = !pricingRoleFilter || row['pricing_role_category'] === pricingRoleFilter;
+				
+				return matchesSearch && matchesBrand && matchesCategory && matchesPricingRole;
+			});
+		}
 
         function render() {
             if (!filteredRows.length) {
