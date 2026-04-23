@@ -1161,8 +1161,27 @@
         function checkExistingSession() {
             const savedToken = sessionStorage.getItem(SESSION_KEY);
             if (savedToken) {
-                validateToken(savedToken, true);
+                validateToken(savedToken, true, true);
             }
+        }
+
+        function handleTokenExpired() {
+            isAuthenticated = false;
+            authToken = null;
+            sessionStorage.removeItem(SESSION_KEY);
+
+            document.getElementById('tokenInput').value = '';
+            document.getElementById('tokenInput').classList.remove('error');
+            document.getElementById('mainApp').classList.remove('authenticated');
+            document.getElementById('authContainer').style.display = 'flex';
+
+            const authError = document.getElementById('authError');
+            authError.textContent = 'Your access token has expired. Please contact your administrator to receive a new token.';
+            authError.style.display = 'block';
+
+            setTimeout(() => {
+                document.getElementById('tokenInput').focus();
+            }, 100);
         }
 
         function setupAuthHandlers() {
@@ -1337,7 +1356,7 @@
             });
         }
 
-        async function validateToken(token, silent = false) {
+        async function validateToken(token, silent = false, isSessionRestore = false) {
             const authButton = document.getElementById('authButton');
             const authError = document.getElementById('authError');
             const authLoading = document.getElementById('authLoading');
@@ -1364,7 +1383,10 @@
                     sessionStorage.setItem(SESSION_KEY, token);
                     showMainApp();
                 } else if (response.status === 401) {
-                    throw new Error('Invalid GitHub token. Please check your token and try again.');
+                    if (isSessionRestore) {
+                        throw new Error('Your access token has expired. Please contact your administrator to receive a new token.');
+                    }
+                    throw new Error('Invalid or expired token. Please check your token and try again.');
                 } else if (response.status === 404) {
                     throw new Error('Access denied. Your token does not have permission to access this repository.');
                 } else {
@@ -1372,15 +1394,19 @@
                 }
             } catch (error) {
                 console.error('Authentication error:', error);
+                isAuthenticated = false;
+                authToken = null;
+                sessionStorage.removeItem(SESSION_KEY);
                 if (!silent) {
                     authError.textContent = error.message;
                     authError.style.display = 'block';
                     tokenInput.classList.add('error');
                     tokenInput.focus();
+                } else if (isSessionRestore) {
+                    // Show the expiry message even though we suppressed the loading UI
+                    authError.textContent = error.message;
+                    authError.style.display = 'block';
                 }
-                isAuthenticated = false;
-                authToken = null;
-                sessionStorage.removeItem(SESSION_KEY);
             } finally {
                 if (!silent) {
                     authButton.disabled = false;
@@ -1442,10 +1468,15 @@
                     }
                 );
 
+                if (response.status === 401) {
+                    handleTokenExpired();
+                    return;
+                }
+
                 if (response.ok) {
                     const data = await response.json();
                     lastCommitSha = data.sha;
-                    
+
                     debugLog('GitHub response data:', {
                         size: data.size,
                         encoding: data.encoding,
@@ -1894,12 +1925,17 @@
                 let remoteDatabase = [];
                 let hasRemoteData = false;
 
+                if (response.status === 401) {
+                    handleTokenExpired();
+                    throw new Error('Your access token has expired. Please log in again with a new token.');
+                }
+
                 if (response.ok) {
                     const data = await response.json();
                     lastCommitSha = data.sha;
-                    
+
                     let content;
-                    
+
                     // Check if file is too large for direct content API (>1MB)
                     if (data.size > 1000000 || !data.content) {
                         // For large files, use the Git Data API to get the blob
@@ -2143,6 +2179,9 @@
                 lastCommitSha = data.content.sha;
                 lastSyncTime = syncTimestamp;
                 localStorage.setItem('lastSyncTime', lastSyncTime);
+            } else if (response.status === 401) {
+                handleTokenExpired();
+                throw new Error('Your access token has expired. Please log in again with a new token.');
             } else {
                 const error = await response.json();
                 throw new Error(error.message || 'Failed to push to GitHub');
