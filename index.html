@@ -88,6 +88,21 @@
             gap: 12px;
             align-items: end;
         }
+
+        .search-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .search-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--matas-blue);
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            padding-left: 2px;
+        }
         
         .filter-select {
             padding: 12px 18px;
@@ -1058,7 +1073,10 @@
     
     <div class="controls">
             <div class="controls-row">
-                <input id="searchInput" class="search-input" type="search" placeholder="Search by Product or Varenummer" inputmode="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+                <div class="search-wrapper">
+                    <label class="search-label" for="searchInput">Search by Product or Varenummer</label>
+                    <input id="searchInput" class="search-input" type="search" placeholder="Product name or ID…" inputmode="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+                </div>
                 <select id="brandFilter" class="filter-select">
                     <option value="">All Brands</option>
 				</select>
