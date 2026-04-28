@@ -84,7 +84,7 @@
         
         .controls-row {
             display: grid;
-            grid-template-columns: 1fr auto auto auto auto;
+            grid-template-columns: 1fr auto auto auto auto auto;
             gap: 12px;
             align-items: end;
         }
@@ -784,7 +784,7 @@
             }
 
             .controls-row {
-                grid-template-columns: 1fr auto auto;
+                grid-template-columns: 1fr auto auto auto;
                 gap: 15px;
             }
 
@@ -1068,6 +1068,11 @@
 				<select id="pricingRoleFilter" class="filter-select">
 					<option value="">All Pricing Roles</option>
 				</select>
+				<select id="priceStatusFilter" class="filter-select">
+					<option value="">All Price Statuses</option>
+					<option value="has_price">Has Price</option>
+					<option value="no_price">No Price</option>
+				</select>
 				<button id="loadButton" class="load-button">Load Data</button>
                 <button id="syncButton" class="sync-button" disabled>Sync</button>
             </div>
@@ -1245,6 +1250,15 @@
 			const pricingRoleFilter = document.getElementById('pricingRoleFilter');
 
 			pricingRoleFilter.addEventListener('change', () => {
+				if (!allRows.length) return;
+				applySearch(searchInput.value.trim());
+				currentPage = 1;
+				render();
+			});
+
+			const priceStatusFilter = document.getElementById('priceStatusFilter');
+
+			priceStatusFilter.addEventListener('change', () => {
 				if (!allRows.length) return;
 				applySearch(searchInput.value.trim());
 				currentPage = 1;
@@ -1701,23 +1715,34 @@
 			const brandFilter = document.getElementById('brandFilter').value;
 			const categoryFilter = document.getElementById('categoryFilter').value;
 			const pricingRoleFilter = document.getElementById('pricingRoleFilter').value;
-			
+			const priceStatusFilter = document.getElementById('priceStatusFilter').value;
+
 			filteredRows = allRows.filter(row => {
 				// Apply text search
 				const matchesSearch = !searchQuery || ['Product', 'Product ID'].some(
 					field => String(row[field] || '').toLowerCase().includes(searchQuery)
 				);
-				
+
 				// Apply brand filter
 				const matchesBrand = !brandFilter || row['Brand'] === brandFilter;
-				
+
 				// Apply category filter
 				const matchesCategory = !categoryFilter || row['Category'] === categoryFilter;
-				
+
 				// Apply pricing role filter
 				const matchesPricingRole = !pricingRoleFilter || row['pricing_role_category'] === pricingRoleFilter;
-				
-				return matchesSearch && matchesBrand && matchesCategory && matchesPricingRole;
+
+				// Apply price status filter (respect locally edited values)
+				let matchesPriceStatus = true;
+				if (priceStatusFilter) {
+					const effectivePrice = localChanges.has(row.__id)
+						? (dirtyById.get(row.__id) || '')
+						: (row['Price'] || '');
+					const hasPrice = effectivePrice.trim() !== '';
+					matchesPriceStatus = priceStatusFilter === 'has_price' ? hasPrice : !hasPrice;
+				}
+
+				return matchesSearch && matchesBrand && matchesCategory && matchesPricingRole && matchesPriceStatus;
 			});
 		}
 
